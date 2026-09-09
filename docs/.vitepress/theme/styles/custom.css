@@ -228,16 +228,33 @@ html.sb-hide .sb-toggle {
   left: 12px;
 }
 
-/* 收起状态：隐藏侧栏，内容占满 */
+/* 收起状态：隐藏侧栏，内容与导航栏都占满全宽 */
 @media (min-width: 960px) {
   html.sb-hide .VPSidebar { display: none; }
   html.sb-hide .VPContent.has-sidebar { padding-left: 0 !important; }
+
+  /* 导航栏：取消为侧栏预留的站名区和内容区左留白 */
+  html.sb-hide .VPNavBar.has-sidebar .title {
+    position: static;
+    width: auto;
+    padding: 0 24px;
+  }
+  html.sb-hide .VPNavBar.has-sidebar .content {
+    padding-left: 24px !important;
+  }
+  html.sb-hide .VPNavBar.has-sidebar .divider {
+    padding-left: 0 !important;
+  }
 }
 
 @media (min-width: 1440px) {
   html.sb-hide .VPContent.has-sidebar {
-    padding-left: calc((100vw - var(--vp-layout-max-width)) / 2) !important;
-    padding-right: calc((100vw - var(--vp-layout-max-width)) / 2) !important;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+  }
+  html.sb-hide .VPNavBar.has-sidebar .content {
+    padding-left: max(24px, calc((100vw - var(--vp-layout-max-width)) / 2)) !important;
+    padding-right: calc((100vw - var(--vp-layout-max-width)) / 2 + 32px) !important;
   }
 }
 
