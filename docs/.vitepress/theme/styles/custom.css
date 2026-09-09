@@ -1,0 +1,202 @@
+/* ===== 首页 banner：全屏真实照片 + 居中标题 + 下滑箭头 ===== */
+/* 想换图：把你的图放到 docs/public/banner.jpg 覆盖即可 */
+.VPHome .VPHero {
+  position: relative;
+  background: #2c3e50 url('/banner.jpg') center / cover no-repeat;
+  margin-top: calc(var(--vp-nav-height) * -1);
+  padding-top: var(--vp-nav-height);
+  min-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+/* 压暗层：保证文字在任何图上都读得清 */
+.VPHome .VPHero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(15, 22, 30, 0.5), rgba(15, 22, 30, 0.22) 50%, rgba(15, 22, 30, 0.55));
+  pointer-events: none;
+}
+
+.VPHome .VPHero .container {
+  position: relative;
+  z-index: 1;
+  text-align: center;
+}
+
+.VPHome .VPHero .name,
+.VPHome .VPHero .text,
+.VPHome .VPHero .tagline {
+  color: #fff !important;
+  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.5);
+}
+
+.VPHome .VPHero .name {
+  font-size: 36px !important;
+  letter-spacing: 0.1em;
+}
+
+.VPHome .VPHero .text {
+  font-size: 28px !important;
+  letter-spacing: 0.06em;
+}
+
+.VPHome .VPHero .tagline {
+  font-size: 17px !important;
+  opacity: 0.9;
+  letter-spacing: 0.35em;
+}
+
+/* 底部下滑箭头（双线 chevron，带浮动动画） */
+.VPHome .VPHero::after {
+  content: '';
+  position: absolute;
+  bottom: 30px;
+  left: 50%;
+  width: 16px;
+  height: 16px;
+  border-right: 2px solid rgba(255, 255, 255, 0.9);
+  border-bottom: 2px solid rgba(255, 255, 255, 0.9);
+  transform: translateX(-50%) rotate(45deg);
+  animation: hero-arrow 2s ease-in-out infinite;
+  z-index: 1;
+}
+
+@keyframes hero-arrow {
+  0%, 100% { opacity: 0.5; margin-bottom: 0; }
+  50% { opacity: 1; margin-bottom: 10px; }
+}
+
+/* ===== 文章卡片列表 ===== */
+.post-section {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 32px 24px 80px;
+}
+
+.post-card {
+  display: block;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 12px;
+  padding: 20px 24px;
+  margin-bottom: 16px;
+  background: var(--vp-c-bg);
+  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.post-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--vp-c-brand-1);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.08);
+}
+
+.post-card-title {
+  font-weight: 600;
+  font-size: 21px;
+  color: var(--vp-c-text-1);
+  line-height: 1.5;
+}
+
+.post-pin {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--vp-c-brand-1);
+  border: 1px solid var(--vp-c-brand-1);
+  border-radius: 6px;
+  padding: 0 6px;
+  margin-left: 8px;
+  vertical-align: 3px;
+}
+
+.post-card-meta {
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--vp-c-text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.post-card-desc {
+  margin: 12px 0 0;
+  font-size: 15px;
+  color: var(--vp-c-text-2);
+  line-height: 1.8;
+}
+
+.post-card-more {
+  display: inline-block;
+  margin-top: 14px;
+  font-size: 14px;
+  color: var(--vp-c-brand-1);
+}
+
+/* ===== 正文阅读体验 ===== */
+.vp-doc {
+  --vp-c-text-1: #2a2f36;
+}
+
+.vp-doc p {
+  line-height: 1.85;
+}
+
+.vp-doc h2 {
+  padding-top: 24px;
+  border-top: 1px solid var(--vp-c-divider);
+  margin-top: 32px;
+  letter-spacing: 0.02em;
+}
+
+.vp-doc h2:first-of-type {
+  border-top: none;
+  padding-top: 0;
+  margin-top: 0;
+}
+
+.vp-doc table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.vp-doc th,
+.vp-doc td {
+  border: 1px solid var(--vp-c-divider);
+  padding: 8px 14px;
+}
+
+.vp-doc tr:nth-child(2n) td {
+  background: var(--vp-c-bg-soft);
+}
+
+.vp-doc div[class*='language-'] {
+  border-radius: 10px;
+}
+
+/* ===== 页脚 ===== */
+.VPFooter {
+  border-top: none !important;
+  background: var(--vp-c-bg-soft) !important;
+}
+
+/* ===== "编辑此页"浮动按钮（仅本地开发模式渲染） ===== */
+.edit-in-editor {
+  position: fixed;
+  right: 28px;
+  bottom: 34px;
+  z-index: 50;
+  padding: 9px 16px;
+  border-radius: 999px;
+  background: rgba(30, 34, 40, 0.88);
+  color: #fff;
+  font-size: 13px;
+  text-decoration: none;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+  transition: transform 0.2s, background 0.2s;
+}
+
+.edit-in-editor:hover {
+  background: rgba(9, 105, 218, 0.92);
+  transform: translateY(-2px);
+  color: #fff;
+}
