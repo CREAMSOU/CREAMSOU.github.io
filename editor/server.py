@@ -10,6 +10,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import webbrowser
 from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -129,11 +130,29 @@ class Handler(BaseHTTPRequestHandler):
             for args, msg in [(['add', '-A'], '加入暂存区'),
                               (['commit', '-m',
                                 'update: ' + date.today().isoformat()],
-                               '提交'),
-                              (['push'], '推送到 GitHub')]:
+                               '提交')]:
                 code, out = run_git(args)
                 logs.append(f'== {msg} ==\n{out or "(无输出)"}')
                 if code != 0:
+                    return self._json({'ok': False,
+                                       'log': '\n'.join(logs)})
+            # 先试常规 git push；网络不通时回退到 GitHub API 推送
+            code, out = run_git(['push'])
+            if code == 0:
+                logs.append('== 推送到 GitHub ==\ngit push 成功')
+            else:
+                logs.append(f'== git push 失败，改走 API 推送 ==\n{out}')
+                py = sys.executable
+                r = subprocess.run([py, os.path.join(ROOT, 'editor',
+                                                     'api_push.py'),
+                                    '.', 'update: ' + date.today().isoformat()],
+                                   cwd=ROOT, capture_output=True, text=True,
+                                   encoding='utf-8', errors='replace',
+                                   timeout=300)
+                ok = 'PUSH_OK' in (r.stdout or '')
+                logs.append(r.stdout[-600:] if ok else
+                            (r.stdout + r.stderr)[-1200:])
+                if not ok:
                     return self._json({'ok': False,
                                        'log': '\n'.join(logs)})
             return self._json({'ok': True, 'log': '\n'.join(logs)})
