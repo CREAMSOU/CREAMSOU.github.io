@@ -245,6 +245,11 @@ html.sb-hide .sb-toggle {
   html.sb-hide .VPNavBar.has-sidebar .divider {
     padding-left: 0 !important;
   }
+
+  /* 导航栏加实底：banner 从导航栏下缘开始，不再从透明区透出 */
+  html.sb-hide .VPNavBar {
+    background-color: var(--vp-nav-bg-color) !important;
+  }
 }
 
 @media (min-width: 1440px) {
