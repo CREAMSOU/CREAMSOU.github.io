@@ -1,18 +1,18 @@
-/* ===== 首页 banner：全屏真实照片 + 居中标题 + 下滑箭头 ===== */
+/* ===== 首页 banner：内容区全宽照片 + 居中标题（layout: page，左侧目录全站可见） ===== */
 /* 想换图：把你的图放到 docs/public/banner.jpg 覆盖即可 */
-.VPHome .VPHero {
+.home-hero {
   position: relative;
   background: #2c3e50 url('/banner.jpg') center / cover no-repeat;
   margin-top: calc(var(--vp-nav-height) * -1);
   padding-top: var(--vp-nav-height);
-  min-height: 92vh;
+  min-height: 44vh;
   display: flex;
   flex-direction: column;
   justify-content: center;
 }
 
 /* 压暗层：保证文字在任何图上都读得清 */
-.VPHome .VPHero::before {
+.home-hero::before {
   content: '';
   position: absolute;
   inset: 0;
@@ -20,53 +20,31 @@
   pointer-events: none;
 }
 
-.VPHome .VPHero .container {
+.home-hero-inner {
   position: relative;
   z-index: 1;
   text-align: center;
+  padding: 80px 24px;
 }
 
-.VPHome .VPHero .name,
-.VPHome .VPHero .text,
-.VPHome .VPHero .tagline {
-  color: #fff !important;
-  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.5);
-}
-
-.VPHome .VPHero .name {
-  font-size: 36px !important;
+.home-hero-inner h1 {
+  margin: 0;
+  color: #fff;
+  font-size: 34px;
+  font-weight: 600;
   letter-spacing: 0.1em;
+  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.5);
+  border: none;
+  padding: 0;
 }
 
-.VPHome .VPHero .text {
-  font-size: 28px !important;
-  letter-spacing: 0.06em;
-}
-
-.VPHome .VPHero .tagline {
-  font-size: 17px !important;
-  opacity: 0.9;
+.home-hero-inner p {
+  margin: 16px 0 0;
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 16px;
   letter-spacing: 0.35em;
-}
-
-/* 底部下滑箭头（双线 chevron，带浮动动画） */
-.VPHome .VPHero::after {
-  content: '';
-  position: absolute;
-  bottom: 30px;
-  left: 50%;
-  width: 16px;
-  height: 16px;
-  border-right: 2px solid rgba(255, 255, 255, 0.9);
-  border-bottom: 2px solid rgba(255, 255, 255, 0.9);
-  transform: translateX(-50%) rotate(45deg);
-  animation: hero-arrow 2s ease-in-out infinite;
-  z-index: 1;
-}
-
-@keyframes hero-arrow {
-  0%, 100% { opacity: 0.5; margin-bottom: 0; }
-  50% { opacity: 1; margin-bottom: 10px; }
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+  line-height: 1.8;
 }
 
 /* ===== 文章卡片列表 ===== */
