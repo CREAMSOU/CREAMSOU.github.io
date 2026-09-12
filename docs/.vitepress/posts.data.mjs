@@ -31,19 +31,37 @@ function toMinutes(src) {
   return Math.max(1, Math.round(cjk / 400 + words / 250))
 }
 
+// 修改记录：frontmatter 的 updates 是字符串数组，按时间倒序写（最新的放第一条），
+// 例如 "2026-09-12 补上发布链路的配图"。这里统一成 {date, text} 结构。
+function toUpdates(v) {
+  if (!Array.isArray(v)) return []
+  return v.map((raw) => {
+    const s = String(raw).trim()
+    const m = s.match(/^(\d{4}-\d{2}-\d{2})\s*[:：]?\s*(.*)$/)
+    return m
+      ? { date: m[1], text: m[2].trim() }
+      : { date: '', text: s }
+  })
+}
+
 export default createContentLoader('posts/*.md', {
   includeSrc: true,
   excerpt: true,
   transform(raw) {
     return raw
-      .map((item) => ({
-        url: item.url,
-        title: String(item.frontmatter.title || ''),
-        date: toDateStr(item.frontmatter.date),
-        description: String(item.frontmatter.description || ''),
-        minutes: toMinutes(item.src),
-        top: item.frontmatter.top === true
-      }))
+      .map((item) => {
+        const updates = toUpdates(item.frontmatter.updates)
+        return {
+          url: item.url,
+          title: String(item.frontmatter.title || ''),
+          date: toDateStr(item.frontmatter.date),
+          updated: updates[0]?.date || toDateStr(item.frontmatter.updated) || '',
+          updates,
+          description: String(item.frontmatter.description || ''),
+          minutes: toMinutes(item.src),
+          top: item.frontmatter.top === true
+        }
+      })
       .sort((a, b) => {
         if (a.top !== b.top) return a.top ? -1 : 1
         return b.date.localeCompare(a.date)

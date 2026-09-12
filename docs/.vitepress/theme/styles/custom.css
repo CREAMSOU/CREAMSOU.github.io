@@ -238,6 +238,73 @@ html:not(.dark) .vp-doc {
   color: var(--vp-c-text-3);
 }
 
+/* ===== 正文示意图（组件版）：配色全部走变量，跟随亮/暗主题 ===== */
+.dgm-wrap {
+  margin: 26px 0 10px;
+  overflow-x: auto;
+}
+
+.dgm {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-width: 560px;
+  font-family: 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+
+  /* 亮色取值 */
+  --p-bg: #fbfaf7;
+  --p-line: #ece7dd;
+  --cap: #8a8578;
+  --note: #a8a294;
+  --sub: #8a8f96;
+  --hi-bg: #e8f1fb;   --hi-line: #b9d3ee;   --hi-fg: #2f5d8c;
+  --ok-bg: #e9f4ec;   --ok-line: #c3dfcb;   --ok-fg: #2f6b41;
+  --warm-bg: #fdf3e0; --warm-line: #eed9ac; --warm-fg: #8a6220;
+  --mut-bg: #f4f3f0;  --mut-line: #e2ded4;  --mut-fg: #8d887e;
+  --dim: #c0b9a9;
+  --alt-fg: #6b7280;
+  --alt-line: #b9b2a4;
+}
+
+html.dark .dgm {
+  --p-bg: #1e1e20;
+  --p-line: #303034;
+  --cap: #8b8b93;
+  --note: #74747c;
+  --sub: #8b8f96;
+  --hi-bg: #17293c;   --hi-line: #2f5d8c;   --hi-fg: #9dc6ea;
+  --ok-bg: #16281d;   --ok-line: #2f6b41;   --ok-fg: #8cce9e;
+  --warm-bg: #2a2113; --warm-line: #6b5320; --warm-fg: #d9b877;
+  --mut-bg: #232326;  --mut-line: #33333a;  --mut-fg: #85858d;
+  --dim: #4a4a52;
+  --alt-fg: #9aa0a6;
+  --alt-line: #5a5a62;
+}
+
+.dgm .panel { fill: var(--p-bg); }
+.dgm .panel-line { fill: none; stroke: var(--p-line); }
+.dgm .cap { fill: var(--cap); }
+.dgm .note { fill: var(--note); }
+.dgm .t-sub { fill: var(--sub); }
+.dgm .t-hi { fill: var(--hi-fg); }
+.dgm .t-ok { fill: var(--ok-fg); }
+.dgm .t-warm { fill: var(--warm-fg); }
+.dgm .t-mut { fill: var(--mut-fg); }
+.dgm .t-alt { fill: var(--alt-fg); }
+
+.dgm .b-hi { fill: var(--hi-bg); stroke: var(--hi-line); stroke-width: 1.5; }
+.dgm .b-ok { fill: var(--ok-bg); stroke: var(--ok-line); stroke-width: 1.5; }
+.dgm .b-warm { fill: var(--warm-bg); stroke: var(--warm-line); stroke-width: 1.5; }
+.dgm .b-mut { fill: var(--mut-bg); stroke: var(--mut-line); stroke-width: 1.5; }
+.dgm .b-dash { fill: var(--p-bg); stroke: var(--alt-line); stroke-width: 1.5; stroke-dasharray: 6 5; }
+
+.dgm .link-hi { stroke: var(--hi-line); }
+.dgm .link-mut { stroke: var(--mut-line); }
+.dgm .link-dim { stroke: var(--dim); }
+.dgm .arrow-hi { fill: var(--hi-line); }
+.dgm .arrow-mut { fill: var(--mut-line); }
+.dgm .arrow-dim { fill: var(--dim); }
+
 /* ===== 引用块：用来放"对照例句" ===== */
 .vp-doc blockquote {
   border-radius: 0 8px 8px 0;
@@ -263,6 +330,85 @@ html:not(.dark) .vp-doc {
     display: block;
     overflow-x: auto;
   }
+}
+
+/* ===== 文章底部：发布于 / 最后更新 / 修改记录 ===== */
+.post-meta {
+  margin-top: 44px;
+  padding-top: 16px;
+  border-top: 1px solid var(--vp-c-divider);
+  font-size: 13.5px;
+  color: var(--vp-c-text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.post-meta-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.post-meta-dot {
+  color: var(--vp-c-divider);
+}
+
+.post-meta-log {
+  margin-top: 12px;
+}
+
+.post-meta-log summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--vp-c-text-2);
+  list-style: none;
+  transition: color 0.15s;
+}
+
+.post-meta-log summary::-webkit-details-marker {
+  display: none;
+}
+
+.post-meta-log summary::before {
+  content: '';
+  width: 0;
+  height: 0;
+  border-left: 5px solid currentColor;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  transition: transform 0.15s ease;
+}
+
+.post-meta-log[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.post-meta-log summary:hover {
+  color: var(--vp-c-brand-1);
+}
+
+.post-meta-log ul {
+  margin: 12px 0 0;
+  padding: 0 0 0 14px;
+  list-style: none;
+  border-left: 2px solid var(--vp-c-divider);
+}
+
+.post-meta-log li {
+  display: flex;
+  gap: 10px;
+  font-size: 13px;
+  line-height: 1.9;
+  color: var(--vp-c-text-2);
+}
+
+.post-meta-date {
+  flex: none;
+  color: var(--vp-c-text-3);
+  font-variant-numeric: tabular-nums;
 }
 
 /* ===== 页脚 ===== */
