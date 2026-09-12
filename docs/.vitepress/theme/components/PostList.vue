@@ -23,6 +23,10 @@ function formatDate(d) {
       </div>
       <div class="post-card-meta">
         <span>发表于 {{ formatDate(p.date) }}</span>
+        <template v-if="p.minutes">
+          <span class="post-card-dot">·</span>
+          <span>约 {{ p.minutes }} 分钟</span>
+        </template>
       </div>
       <p v-if="p.description" class="post-card-desc">{{ p.description }}</p>
       <span class="post-card-more">阅读全文 »</span>

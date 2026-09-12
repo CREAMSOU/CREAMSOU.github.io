@@ -96,6 +96,11 @@
   font-variant-numeric: tabular-nums;
 }
 
+.post-card-dot {
+  margin: 0 6px;
+  color: var(--vp-c-divider);
+}
+
 .post-card-desc {
   margin: 12px 0 0;
   font-size: 15px;
@@ -150,6 +155,114 @@ html:not(.dark) .vp-doc {
 
 .vp-doc div[class*='language-'] {
   border-radius: 10px;
+}
+
+/* ===== 文章开头的"速览"卡片 ===== */
+.lead-card {
+  margin: 20px 0 28px;
+  padding: 16px 20px 18px;
+  border: 1px solid var(--vp-c-brand-2);
+  border-left-width: 3px;
+  border-radius: 10px;
+  background: var(--vp-c-brand-soft);
+}
+
+.lead-label {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--vp-c-brand-1);
+  margin-bottom: 8px;
+}
+
+.lead-list {
+  margin: 0;
+  padding-left: 18px;
+  list-style: disc;
+}
+
+.lead-list li {
+  font-size: 14.5px;
+  line-height: 1.8;
+  color: var(--vp-c-text-1);
+  margin: 3px 0;
+}
+
+/* 速览卡片自己带上下边距，压掉紧跟其后的第一个段落顶距 */
+.lead-card + p {
+  margin-top: 0;
+}
+
+/* ===== 提示块（::: tip / warning / details） ===== */
+.vp-doc .custom-block {
+  border-radius: 10px;
+  padding: 14px 18px;
+  font-size: 14.5px;
+}
+
+.vp-doc .custom-block .custom-block-title {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.vp-doc .custom-block p {
+  line-height: 1.75;
+}
+
+.vp-doc details.custom-block summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--vp-c-text-1);
+}
+
+.vp-doc details.custom-block[open] summary {
+  margin-bottom: 6px;
+}
+
+/* ===== 正文里的配图 ===== */
+.vp-doc img {
+  display: block;
+  margin: 22px auto;
+  border-radius: 10px;
+  max-width: 100%;
+}
+
+.vp-doc figure {
+  margin: 24px 0;
+}
+
+.vp-doc figcaption {
+  margin-top: -6px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--vp-c-text-3);
+}
+
+/* ===== 引用块：用来放"对照例句" ===== */
+.vp-doc blockquote {
+  border-radius: 0 8px 8px 0;
+}
+
+.vp-doc blockquote p {
+  font-size: 14.5px;
+  line-height: 1.75;
+}
+
+/* ===== 脚注 ===== */
+.vp-doc .footnotes {
+  margin-top: 40px;
+  padding-top: 16px;
+  border-top: 1px solid var(--vp-c-divider);
+  font-size: 13.5px;
+  color: var(--vp-c-text-2);
+}
+
+/* ===== 表格：小屏横向滚动，避免撑破页面（桌面端不动原有排版） ===== */
+@media (max-width: 719px) {
+  .vp-doc table {
+    display: block;
+    overflow-x: auto;
+  }
 }
 
 /* ===== 页脚 ===== */

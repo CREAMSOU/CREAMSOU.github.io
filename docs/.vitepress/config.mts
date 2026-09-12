@@ -24,6 +24,19 @@ export default defineConfig({
   description: '做点东西，写点想法。项目复盘与学习笔记。',
   cleanDist: false,
   appearance: true,
+  markdown: {
+    // 提示块的默认标题改中文
+    container: {
+      tipLabel: '提示',
+      warningLabel: '注意',
+      dangerLabel: '危险',
+      infoLabel: '说明',
+      detailsLabel: '展开看细节'
+    },
+    image: {
+      lazyLoading: true
+    }
+  },
   vite: {
     build: {
       emptyOutDir: false

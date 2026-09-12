@@ -1,6 +1,7 @@
 import DefaultTheme from 'vitepress/theme'
 import { h } from 'vue'
 import HomeHero from './components/HomeHero.vue'
+import Lead from './components/Lead.vue'
 import EditBar from './components/EditBar.vue'
 import SidebarToggle from './components/SidebarToggle.vue'
 import './styles/custom.css'
@@ -18,5 +19,7 @@ export default {
   enhanceApp({ app }) {
     // 首页 index.md 里直接用 <HomeHero />
     app.component('HomeHero', HomeHero)
+    // 文章开头的"速览"卡片：<Lead :points="['…', '…']" />
+    app.component('Lead', Lead)
   }
 }
