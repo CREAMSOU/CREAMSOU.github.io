@@ -7,6 +7,8 @@ import SidebarToggle from './components/SidebarToggle.vue'
 import PostMeta from './components/PostMeta.vue'
 import DiagramNarrative from './components/DiagramNarrative.vue'
 import DiagramPublish from './components/DiagramPublish.vue'
+import DemoLagrange from './components/DemoLagrange.vue'
+import DemoError from './components/DemoError.vue'
 import './styles/custom.css'
 
 export default {
@@ -27,5 +29,8 @@ export default {
     // 正文配图（自带配色，跟随亮/暗主题）：<DiagramPublish /> / <DiagramNarrative />
     app.component('DiagramPublish', DiagramPublish)
     app.component('DiagramNarrative', DiagramNarrative)
+    // 正文可交互演示（canvas，跟随亮/暗主题）：<DemoLagrange /> / <DemoError />
+    app.component('DemoLagrange', DemoLagrange)
+    app.component('DemoError', DemoError)
   }
 }
