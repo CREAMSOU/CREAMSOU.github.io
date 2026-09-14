@@ -2,8 +2,8 @@
 """
 博客本地编辑器（零依赖：仅 Python 标准库）
 - 只监听 127.0.0.1，仅本机可访问
-- 功能：文章列表 / 新建 / 编辑 / 实时预览 / 保存 / 一键发布（git add + commit + push）
-- 预览面板按博客实际排版渲染 Markdown（左侧写，右侧看，所见即所得）
+- 功能：文章列表（按分类分组）/ 新建 / 编辑 / 实时预览 / 保存 / 整理分类 / 一键发布
+- /api/ping 带 CORS 头：线上博客页可以探测本机是否开着编辑器，探测到才显示"编辑此页"
 启动：python editor/server.py  （或双击 blog/editor.bat）
 """
 import json
@@ -21,6 +21,10 @@ POSTS_DIR = os.path.join(ROOT, 'docs', 'posts')
 HOST, PORT = '127.0.0.1', 8891
 SAFE_NAME = re.compile(r'^[0-9A-Za-z_\-]+\.md$')
 
+# frontmatter 按这个顺序输出；不在这张表里的字段（比如 updates）原样保留
+KNOWN_FM = ('title', 'date', 'category', 'description', 'top')
+KEY_RE = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*)\s*:')
+
 
 def run_git(args):
     r = subprocess.run(['git'] + args, cwd=ROOT, capture_output=True,
@@ -29,33 +33,66 @@ def run_git(args):
     return r.returncode, out.strip()
 
 
-def compose_md(title, d, description, top, body):
-    lines = ['---', f'title: {title}', f'date: {d}']
-    if description:
-        lines.append(f'description: {description}')
-    if top:
-        lines.append('top: true')
-    lines += ['---', '']
-    return '\n'.join(lines) + '\n' + body.strip() + '\n'
+def split_frontmatter(text):
+    """拆成 (frontmatter 原始行列表, 正文)"""
+    m = re.match(r'^---\s*\n(.*?)\n---\s*\n?(.*)$', text or '', re.S)
+    if not m:
+        return [], text or ''
+    return m.group(1).splitlines(), m.group(2)
+
+
+def fm_blocks(lines):
+    """把 frontmatter 按顶层字段分段，每段保留原始文本。
+    updates 这种多行字段（续行以空格 + - 开头）不会被拆散。"""
+    blocks = []
+    for line in lines:
+        m = KEY_RE.match(line)
+        if m:
+            blocks.append((m.group(1), [line]))
+        elif blocks and line.strip():
+            blocks[-1][1].append(line)
+    return blocks
 
 
 def parse_md(text):
-    m = re.match(r'^---\s*\n(.*?)\n---\s*\n?(.*)$', text, re.S)
-    fm, body = {}, text
-    if m:
-        body = m.group(2)
-        for line in m.group(1).splitlines():
-            if ':' in line:
-                k, v = line.split(':', 1)
-                fm[k.strip()] = v.strip()
+    """取字段值（多行字段只取首行，够用）+ 正文"""
+    lines, body = split_frontmatter(text)
+    fm = {}
+    for k, blk in fm_blocks(lines):
+        fm[k] = blk[0].split(':', 1)[1].strip() if ':' in blk[0] else ''
     return fm, body
 
 
+def render_md(old_text, values, body):
+    """按规范顺序重写 frontmatter，未列出的字段（updates 等）原样搬运。
+    values 里为空字符串的字段会被删掉。"""
+    lines, _ = split_frontmatter(old_text)
+    blocks = fm_blocks(lines)
+    out = []
+    for k in KNOWN_FM:
+        v = (values.get(k) or '').strip()
+        if v:
+            out.append(f'{k}: {v}')
+    for k, blk in blocks:
+        if k not in KNOWN_FM:
+            out.extend(blk)
+    return '---\n' + '\n'.join(out) + '\n---\n\n' + (body or '').strip() + '\n'
+
+
 class Handler(BaseHTTPRequestHandler):
+    # ---- 响应工具 ----
+    def _cors(self):
+        # 允许线上博客页（https）请求本机服务：
+        # http://127.0.0.1 属于浏览器认可的"可信来源"，不会被 Mixed Content 拦，
+        # 剩下的是跨源放行 + Chrome 私网访问（PNA）预检两个头。
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Private-Network', 'true')
+
     def _json(self, obj, code=200):
         data = json.dumps(obj, ensure_ascii=False).encode('utf-8')
         self.send_response(code)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self._cors()
         self.send_header('Content-Length', str(len(data)))
         self.end_headers()
         self.wfile.write(data)
@@ -68,22 +105,37 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _read_posts(self):
+        items = []
+        for f in sorted(os.listdir(POSTS_DIR)):
+            if not f.endswith('.md'):
+                continue
+            fm, _ = parse_md(open(os.path.join(POSTS_DIR, f),
+                                  encoding='utf-8').read())
+            items.append({'file': f, 'title': fm.get('title', ''),
+                          'date': fm.get('date', ''),
+                          'category': fm.get('category', ''),
+                          'description': fm.get('description', '')})
+        items.sort(key=lambda x: x['date'], reverse=True)
+        return items
+
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self._cors()
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.send_header('Access-Control-Max-Age', '600')
+        self.end_headers()
+
     def do_GET(self):
         u = urlparse(self.path)
         if u.path in ('/', '/index.html'):
             return self._html(PAGE)
+        # 供线上博客页探测"本机编辑器是否在运行"
+        if u.path == '/api/ping':
+            return self._json({'ok': True, 'app': 'blog-editor'})
         if u.path == '/api/posts':
-            items = []
-            for f in sorted(os.listdir(POSTS_DIR)):
-                if not f.endswith('.md'):
-                    continue
-                fm, body = parse_md(
-                    open(os.path.join(POSTS_DIR, f), encoding='utf-8').read())
-                items.append({'file': f, 'title': fm.get('title', ''),
-                              'date': fm.get('date', ''),
-                              'description': fm.get('description', '')})
-            items.sort(key=lambda x: x['date'], reverse=True)
-            return self._json(items)
+            return self._json(self._read_posts())
         if u.path == '/api/post':
             f = parse_qs(u.query).get('file', [''])[0]
             if not SAFE_NAME.match(f):
@@ -94,6 +146,7 @@ class Handler(BaseHTTPRequestHandler):
             fm, body = parse_md(open(p, encoding='utf-8').read())
             return self._json({'file': f, 'title': fm.get('title', ''),
                                'date': fm.get('date', ''),
+                               'category': fm.get('category', ''),
                                'description': fm.get('description', ''),
                                'top': fm.get('top') == 'true',
                                'body': body})
@@ -117,13 +170,40 @@ class Handler(BaseHTTPRequestHandler):
             f = data.get('file', '')
             if not SAFE_NAME.match(f):
                 return self._json({'error': '文件名只能含英文、数字、-、_'}, 400)
-            md = compose_md(data.get('title', '无标题'), data.get('date') or
-                            date.today().isoformat(),
-                            data.get('description', ''),
-                            bool(data.get('top')), data.get('body', ''))
-            open(os.path.join(POSTS_DIR, f), 'w', encoding='utf-8',
-                 newline='\n').write(md)
+            p = os.path.join(POSTS_DIR, f)
+            old = open(p, encoding='utf-8').read() if os.path.exists(p) else ''
+            md = render_md(old, {
+                'title': data.get('title') or '无标题',
+                'date': data.get('date') or date.today().isoformat(),
+                'category': data.get('category', ''),
+                'description': data.get('description', ''),
+                'top': 'true' if data.get('top') else ''
+            }, data.get('body', ''))
+            open(p, 'w', encoding='utf-8', newline='\n').write(md)
             return self._json({'ok': True, 'file': f})
+
+        # 整理分类：把某个分类整批改名（new 传空 = 这批文章变成"未分类"）
+        if u.path == '/api/category/rename':
+            old = (data.get('old') or '').strip()
+            new = (data.get('new') or '').strip()
+            if not old:
+                return self._json({'error': '缺少原分类名'}, 400)
+            changed = 0
+            for f in sorted(os.listdir(POSTS_DIR)):
+                if not f.endswith('.md'):
+                    continue
+                p = os.path.join(POSTS_DIR, f)
+                text = open(p, encoding='utf-8').read()
+                fm, body = parse_md(text)
+                if (fm.get('category') or '未分类') != old:
+                    continue
+                open(p, 'w', encoding='utf-8', newline='\n').write(render_md(text, {
+                    'title': fm.get('title', ''), 'date': fm.get('date', ''),
+                    'category': new, 'description': fm.get('description', ''),
+                    'top': 'true' if fm.get('top') == 'true' else ''
+                }, body))
+                changed += 1
+            return self._json({'ok': True, 'changed': changed})
 
         if u.path == '/api/publish':
             logs = []
@@ -190,9 +270,20 @@ aside { width: 250px; background: #fff; border-right: 1px solid #d0d7de; overflo
 aside a { display: block; padding: 8px 10px; border-radius: 6px; text-decoration: none; color: #24292f; font-size: 13px; }
 aside a:hover { background: #eef1f4; }
 aside a .d { display: block; color: #8c959f; font-size: 11px; margin-top: 2px; }
+aside .cat { font-size: 12px; font-weight: 600; color: #57606a; padding: 12px 10px 4px; border-top: 1px solid #eaecef; margin-top: 4px; }
+aside .cat:first-child { border-top: none; margin-top: 0; }
+#manage { padding: 4px; }
+#manage .mhead { font-size: 13px; font-weight: 600; padding: 6px 6px 2px; }
+#manage .mtip { font-size: 11.5px; color: #8c959f; line-height: 1.6; padding: 0 6px 8px; }
+#manage .mline { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+#manage .mline input { flex: 1; min-width: 0; border: 1px solid #d0d7de; border-radius: 6px; padding: 6px 8px; font-size: 13px; }
+#manage .mline .mc { font-size: 11px; color: #8c959f; white-space: nowrap; }
+#manage .mact { display: flex; gap: 8px; margin-top: 10px; padding: 0 6px; }
 section { flex: 1; display: flex; flex-direction: column; padding: 14px 18px; gap: 10px; min-width: 0; }
 .row { display: flex; gap: 10px; }
 .row input[type=text] { flex: 1; min-width: 0; border: 1px solid #d0d7de; border-radius: 6px; padding: 7px 10px; font-size: 13px; }
+#date { flex: 0 0 120px; }
+#cat { flex: 0 0 180px; background: #fbfcfd; }
 #desc { width: 100%; border: 1px solid #d0d7de; border-radius: 6px; padding: 7px 10px; font-size: 13px; }
 label.chk { display: flex; align-items: center; gap: 5px; font-size: 13px; white-space: nowrap; }
 .split { flex: 1; display: flex; min-height: 0; }
@@ -223,18 +314,32 @@ textarea { flex: 1; min-width: 0; border: 1px solid #d0d7de; border-radius: 6px 
 <header>
   <h1>博客编辑器（仅本机可访问）</h1>
   <button onclick="window.open('http://localhost:5173')">预览站点</button>
+  <button onclick="openManage()">整理分类</button>
   <button onclick="newPost()">新建文章</button>
   <button class="primary" onclick="save(false)">保存</button>
   <button class="primary" onclick="save(true)">保存并发布</button>
 </header>
 <main>
-  <aside id="list"></aside>
+  <aside>
+    <div id="list"></div>
+    <div id="manage" hidden>
+      <div class="mhead">整理分类（左侧目录的大类）</div>
+      <div class="mtip">改名字后点「应用」，这个分类下的文章会一起移动。名字留空 = 这批文章变成未分类。想新建分类，直接在文章的分类框里写个新名字就行。</div>
+      <div id="mrow"></div>
+      <div class="mact">
+        <button class="primary" onclick="applyManage()">应用</button>
+        <button onclick="closeManage()">返回</button>
+      </div>
+    </div>
+  </aside>
   <section>
     <div class="row">
       <input type="text" id="title" placeholder="文章标题">
-      <input type="text" id="date" placeholder="日期" style="max-width:130px">
+      <input type="text" id="date" placeholder="日期">
+      <input type="text" id="cat" list="catlist" placeholder="分类（左侧目录的大类）">
       <label class="chk"><input type="checkbox" id="top">置顶</label>
     </div>
+    <datalist id="catlist"></datalist>
     <input type="text" id="desc" placeholder="摘要（显示在首页卡片上）">
     <div class="split">
       <textarea id="body" placeholder="左边写 Markdown，右边实时预览博客效果。结构建议：## 分节标题 + 表格 + 有序列表。"></textarea>
@@ -245,6 +350,7 @@ textarea { flex: 1; min-width: 0; border: 1px solid #d0d7de; border-radius: 6px 
 </main>
 <script>
 let cur = null;
+let mgRows = [];
 const $ = id => document.getElementById(id);  // 显式取元素，避免撞上 window.top / window.status 等内置属性
 async function api(path, data) {
   try {
@@ -256,44 +362,101 @@ async function api(path, data) {
     throw e;
   }
 }
+function esc2(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
 async function refresh() {
   const items = await api('/api/posts');
+  // 按分类归组（顺序跟着列表顺序走，也就是最新的分类排前面）
+  const groups = new Map();
+  for (const p of items) {
+    const c = p.category || '未分类';
+    if (!groups.has(c)) groups.set(c, []);
+    groups.get(c).push(p);
+  }
   const el = $('list');
   el.innerHTML = '';
-  for (const p of items) {
-    const a = document.createElement('a');
-    a.href = 'javascript:openPost(\\'' + p.file + '\\')';
-    a.innerHTML = p.title || p.file + '<span class=d>' + p.date + '</span>';
-    el.appendChild(a);
+  for (const [cat, list] of groups) {
+    const h = document.createElement('div');
+    h.className = 'cat';
+    h.textContent = cat + ' · ' + list.length + ' 篇';
+    el.appendChild(h);
+    for (const p of list) {
+      const a = document.createElement('a');
+      a.href = 'javascript:openPost(\\'' + p.file + '\\')';
+      a.innerHTML = esc2(p.title || p.file) + '<span class=d>' + esc2(p.date) + '</span>';
+      el.appendChild(a);
+    }
   }
+  $('catlist').innerHTML = [...groups.keys()].filter(c => c !== '未分类')
+    .map(c => '<option value="' + esc2(c) + '">').join('');
 }
 async function openPost(f) {
   const p = await api('/api/post?file=' + f);
   cur = p.file;
   $('title').value = p.title; $('date').value = p.date; $('desc').value = p.description;
-  $('top').checked = p.top; $('body').value = p.body;
+  $('cat').value = p.category; $('top').checked = p.top; $('body').value = p.body;
   renderPreview();
   $('status').textContent = '已打开 ' + f + '（未保存的改动在点保存前不会生效）';
 }
 function newPost() {
-  const f = prompt('文件名（英文数字，建议 YYYY-MM-DD-标题）：', '2026-09-09-new-post');
+  const today = new Date().toISOString().slice(0,10);
+  const f = prompt('文件名（英文数字，建议 YYYY-MM-DD-标题）：', today + '-new-post');
   if (!f) return;
   cur = f.endsWith('.md') ? f : f + '.md';
-  $('title').value = ''; $('date').value = new Date().toISOString().slice(0,10);
-  $('desc').value = ''; $('top').checked = false; $('body').value = '';
+  $('title').value = ''; $('date').value = today;
+  $('desc').value = ''; $('cat').value = ''; $('top').checked = false; $('body').value = '';
   renderPreview();
-  $('status').textContent = '新文章 ' + cur + '，填写后点"保存"';
+  $('status').textContent = '新文章 ' + cur + '，填好分类和正文后点"保存"';
 }
 async function save(publish) {
   if (!cur) { alert('先新建或从左侧选择一篇文章'); return; }
   $('status').textContent = '保存中...';
   const r = await api('/api/save', {file: cur, title: $('title').value, date: $('date').value,
-    description: $('desc').value, top: $('top').checked, body: $('body').value});
+    category: $('cat').value, description: $('desc').value, top: $('top').checked, body: $('body').value});
   if (r.error) { $('status').textContent = '保存失败：' + r.error; return; }
   if (!publish) { $('status').textContent = '已保存（仅本地，未发布）'; refresh(); return; }
   $('status').textContent = '已保存，正在发布（add → commit → push）...';
   const p = await api('/api/publish', {});
   $('status').textContent = p.log + '\\n\\n' + (p.ok ? '✔ 发布完成，1-2 分钟后线上更新' : '✘ 发布失败（常见原因：还没配置 GitHub 远程仓库）');
+  refresh();
+}
+/* ===== 整理分类 ===== */
+async function openManage() {
+  const items = await api('/api/posts');
+  const cnt = new Map();
+  for (const p of items) {
+    const c = p.category || '未分类';
+    cnt.set(c, (cnt.get(c) || 0) + 1);
+  }
+  mgRows = [...cnt.entries()].map(([name, n]) => ({old: name, n}));
+  const box = $('mrow');
+  box.innerHTML = '';
+  for (const r of mgRows) {
+    const d = document.createElement('div');
+    d.className = 'mline';
+    d.innerHTML = '<input value="' + esc2(r.old === '未分类' ? '' : r.old) + '">'
+      + '<span class="mc">' + r.n + ' 篇</span>';
+    box.appendChild(d);
+  }
+  $('list').hidden = true;
+  $('manage').hidden = false;
+}
+function closeManage() {
+  $('manage').hidden = true;
+  $('list').hidden = false;
+}
+async function applyManage() {
+  const inputs = Array.from($('mrow').querySelectorAll('input'));
+  const changes = inputs.map((el, i) => ({old: mgRows[i].old, nw: el.value.trim()}))
+    .filter(c => c.old !== (c.nw || '未分类'));
+  if (!changes.length) { alert('没有改动'); return; }
+  const msgs = [];
+  for (const c of changes) {
+    const r = await api('/api/category/rename', {old: c.old, new: c.nw});
+    msgs.push((r.error ? '✘ ' : '✔ ') + c.old + ' → ' + (c.nw || '未分类')
+      + (r.error ? '：' + r.error : '（' + (r.changed || 0) + ' 篇）'));
+  }
+  alert(msgs.join('\\n'));
+  closeManage();
   refresh();
 }
 /* ===== Markdown 渲染（覆盖博客文章常用语法） ===== */

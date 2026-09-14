@@ -13,10 +13,10 @@ export default {
   extends: DefaultTheme,
   Layout() {
     return h(DefaultTheme.Layout, null, {
-      // 文章页底部：先"发布于/最后更新/修改记录"，再"编辑此页"入口（后者仅本地开发模式）
-      'doc-after': () => [h(PostMeta), h(EditBar)],
-      // 左侧目录收起/展开按钮（全站，fixed 定位与插槽位置无关）
-      'layout-bottom': () => h(SidebarToggle)
+      // 文章页底部：发布于/最后更新/修改记录
+      'doc-after': () => h(PostMeta),
+      // 全站右下角：目录收起按钮 + 编辑器入口（有编辑器时显示"编辑此页"，本地开发模式一直显示）
+      'layout-bottom': () => [h(SidebarToggle), h(EditBar)]
     })
   },
   enhanceApp({ app }) {
