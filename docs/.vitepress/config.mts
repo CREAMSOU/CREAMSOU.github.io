@@ -2,20 +2,59 @@ import { defineConfig } from 'vitepress'
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-// 自动扫描 posts/ 生成左侧目录：发文零维护，写完 push 目录自己长
+// 小类默认是否收起：true = 点一下才展开；false = 跟着大类一起展开
+const SUB_GROUP_COLLAPSED = false
+
+type Post = { title: string; date: string; link: string }
+type Group = { posts: Post[]; children: Map<string, Group> }
+
+// 扫描 posts/ 自动生成左侧目录。分类写在每篇文章的 frontmatter 里：
+//   category: 大类          → 一级分组
+//   category: 大类/小类      → 两级分组
+// 不写 category 的文章进「未分类」。发文零维护，push 上去目录自己长。
 function postsSidebar() {
   const dir = join(process.cwd(), 'docs', 'posts')
-  const items = []
+  const root: Group = { posts: [], children: new Map() }
+
   for (const f of readdirSync(dir)) {
     if (!f.endsWith('.md')) continue
     const fm = (readFileSync(join(dir, f), 'utf-8').match(
       /^---\s*\n([\s\S]*?)\n---/) || ['', ''])[1]
-    const title = ((fm.match(/^title:\s*(.+)$/m) || [])[1] || f.replace(/\.md$/, '')).trim()
-    const date = ((fm.match(/^date:\s*(.+)$/m) || [])[1] || '').trim()
-    items.push({ title, date, link: '/posts/' + f.replace(/\.md$/, '') })
+    const pick = (k: string) =>
+      ((fm.match(new RegExp('^' + k + ':\\s*(.+)$', 'm')) || [])[1] || '').trim()
+    const title = pick('title') || f.replace(/\.md$/, '')
+    const date = pick('date')
+    const raw = pick('category').replace(/^["']|["']$/g, '')
+    const cats = raw.split('/').map((s) => s.trim()).filter(Boolean)
+
+    let node = root
+    for (const name of (cats.length ? cats : ['未分类'])) {
+      if (!node.children.has(name)) node.children.set(name, { posts: [], children: new Map() })
+      node = node.children.get(name) as Group
+    }
+    node.posts.push({ title, date, link: '/posts/' + f.replace(/\.md$/, '') })
   }
-  items.sort((a, b) => b.date.localeCompare(a.date))
-  return items.map(({ title, link }) => ({ text: title, link }))
+
+  // 分组按「组内最新一篇的日期」倒序排，活跃的排前面
+  const latest = (g: Group): string =>
+    [...g.posts.map((p) => p.date), ...[...g.children.values()].map(latest)]
+      .filter(Boolean).sort().pop() || ''
+
+  const build = (g: Group, depth: number): any[] => {
+    const out: any[] = [...g.children.entries()]
+      .sort((a, b) => latest(b[1]).localeCompare(latest(a[1])))
+      .map(([name, child]) => ({
+        text: name,
+        collapsed: depth > 0 && SUB_GROUP_COLLAPSED,
+        items: build(child, depth + 1)
+      }))
+    for (const p of [...g.posts].sort((a, b) => b.date.localeCompare(a.date))) {
+      out.push({ text: p.title, link: p.link })
+    }
+    return out
+  }
+
+  return build(root, 0)
 }
 
 export default defineConfig({
@@ -48,12 +87,7 @@ export default defineConfig({
       { text: '归档', link: '/archive' },
       { text: '关于', link: '/about' }
     ],
-    sidebar: [
-      {
-        text: '全部文章',
-        items: postsSidebar()
-      }
-    ],
+    sidebar: postsSidebar(),
     outline: [2, 3],
     search: {
       provider: 'local',
