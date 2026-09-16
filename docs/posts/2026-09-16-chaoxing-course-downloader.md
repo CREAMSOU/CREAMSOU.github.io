@@ -77,7 +77,7 @@ python3 chaoxing_dl.py \
   # 加 --ppt-only 只下 PPT
 ```
 
-实测一门课的全部课件（PPT 加 Word 模板）全部下载成功。代码已整理成仓库并 `git init`，登录态相关文件用 `.gitignore` 屏蔽了，不会误提交。
+实测一门课的全部课件（PPT 加 Word 模板）全部下载成功。代码已整理成开源仓库并发布到 GitHub：<https://github.com/CREAMSOU/chaoxing-course-downloader>，登录态相关文件用 `.gitignore` 屏蔽了，不会误提交。
 
 ## 边界和下一步
 
