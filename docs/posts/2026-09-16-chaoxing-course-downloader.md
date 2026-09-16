@@ -10,6 +10,8 @@ updates:
 
 <Lead :points="['超星没有一键下载全部课件的功能，课件散在章节任务和资料区', '新版 Chromium 的 App-Bound Encryption 让读本地 cookie 基本死路', '从 DevTools 复制带 cookie 的 curl 最省事', 'vc3 被 URL 转义，解码即登录失败，必须原样发']" />
 
+> **项目地址**：[github.com/CREAMSOU/chaoxing-course-downloader](https://github.com/CREAMSOU/chaoxing-course-downloader) — MIT License，纯 Python 标准库，零第三方依赖。
+
 想离线看一门超星学习通（泛雅）课程的课件。超星没有「一键下载全部」的按钮，课件分散在「章节任务点」和「资料区」两块，逐一点很烦。
 
 目标很直接：写个脚本，喂课程参数加登录态，自动把整门课的 PPT / PDF / Word 扒到本地。
