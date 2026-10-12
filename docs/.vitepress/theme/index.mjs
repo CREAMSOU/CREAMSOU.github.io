@@ -9,6 +9,7 @@ import DiagramNarrative from './components/DiagramNarrative.vue'
 import DiagramPublish from './components/DiagramPublish.vue'
 import DiagramWeTroubleshoot from './components/DiagramWeTroubleshoot.vue'
 import DiagramDecommission from './components/DiagramDecommission.vue'
+import DiagramFaultLayers from './components/DiagramFaultLayers.vue'
 import DemoLagrange from './components/DemoLagrange.vue'
 import DemoError from './components/DemoError.vue'
 import './styles/custom.css'
@@ -33,6 +34,7 @@ export default {
     app.component('DiagramNarrative', DiagramNarrative)
     app.component('DiagramWeTroubleshoot', DiagramWeTroubleshoot)
     app.component('DiagramDecommission', DiagramDecommission)
+    app.component('DiagramFaultLayers', DiagramFaultLayers)
     // 正文可交互演示（canvas，跟随亮/暗主题）：<DemoLagrange /> / <DemoError />
     app.component('DemoLagrange', DemoLagrange)
     app.component('DemoError', DemoError)
