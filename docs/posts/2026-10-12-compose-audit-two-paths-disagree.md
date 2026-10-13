@@ -185,7 +185,7 @@ services:
 先是漏判。修之前 JSON 输出里长这样：
 
 ```text
-CELERY_BROKER_URL = redis://:difyai123456@redis:6379/1      ← 明文口令
+CELERY_BROKER_URL = redis://:difyai******@redis:6379/1      ← 明文口令
 DB_PASSWORD       = ***REDACTED***
 REDISCLI_AUTH     = ***REDACTED***
 ```
