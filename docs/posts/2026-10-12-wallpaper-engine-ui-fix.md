@@ -1,103 +1,165 @@
 ---
-title: Wallpaper Engine 打不开：托盘没图标、窗口不弹，真凶是 GPU 加速
+title: Wallpaper Engine 打不开：托盘没图标、窗口不弹，真凶是权限不是显卡
 date: 2026-10-12
 category: 学习记录
-description: 界面打不开、托盘没图标，我先是认定缺 WebView2，折腾半天才发现早就装了。真正的崩溃模块藏在 Windows 事件日志里：libcef.dll 的 GPU 加速崩了。
+description: 两轮误判都只解释了一半现象。真因是 CEF 的配置目录不可写，界面进程在建锁文件时就断言退出，连自己的日志都没来得及写。修法是补一条权限，不删任何东西。
 top: false
 updates:
-  - 2026-10-12 首版发布
+  - 2026-10-12 首版发布，当时结论为「GPU 加速冲突」
+  - 2026-10-20 结论更正为 NTFS 权限问题，正文按证据重写
 ---
 
-<Lead :points="['托盘没图标、主窗口不弹，但后台服务还在跑', '第一判断是缺 WebView2，下载安装折腾半天，结论是早就装了', '真正有用的第一步是去读崩溃日志，模块名写在那里', '根因是内置 Chromium 的 GPU 硬件加速，关掉就恢复']" />
+<Lead :points="['界面打不开，但壁纸一直在正常播放', '前两轮判断（缺 WebView2、显卡冲突）各只解释了一半现象', '转折点是发现程序自己的日志在某天之后再没写过字', '真因是配置目录不可写，补一条权限就修好，不需要备份']" />
 
-> **修复脚本**：[github.com/CREAMSOU/wallpaper-engine-ui-fix](https://github.com/CREAMSOU/wallpaper-engine-ui-fix) — MIT License，纯 PowerShell，无第三方依赖，双击提权运行。
+> **修复脚本**：[github.com/CREAMSOU/wallpaper-engine-ui-fix](https://github.com/CREAMSOU/wallpaper-engine-ui-fix) — MIT License，纯 PowerShell，无第三方依赖。先打印证据表，再决定修不修。
 
-某天开始，Wallpaper Engine 打不开了。右下角托盘里没有它的图标，双击桌面快捷方式也没反应，桌面壁纸回到系统默认。
+> **更正（2026-10-20）**：本文首版把原因判为「libcef 的 GPU 加速与显卡冲突」。那个结论是错的，只是碰巧让界面起来过几次。真实原因是 CEF 的配置目录不可写。正文已按证据重写；误判过程保留，因为它是这次最有价值的部分。
 
-去任务管理器看，`wallpaperservice64` 还在跑。也就是说：程序没崩，是它的界面出不来。
+Wallpaper Engine 打不开了。右下角托盘没有图标，双击快捷方式没有反应，但桌面壁纸一直在正常播放。
 
-## 第一判断：缺 WebView2（错了）
+这个组合很别扭：如果程序崩了，壁纸应该跟着停；如果程序正常，界面应该能打开。结果是壁纸活着、界面死了。
 
-Wallpaper Engine 的界面是用一个内置浏览器内核渲染的。所以我的第一反应是：系统缺了那个浏览器运行时（WebView2）。
+任务管理器里只有一个 `wallpaperservice64`。负责界面的 `wallpaperui.exe` 启动后几秒就消失，没有弹窗，没有报错。
 
-这条因果链听着很顺：界面渲染不出来 → 渲染引擎缺了 → 装一个就好。
+## 第一轮：以为缺 WebView2
 
-于是开始动手：
+界面是用内置浏览器内核渲染的，所以第一反应是系统缺了运行时（WebView2）。这条因果链很顺：界面出不来 → 渲染引擎缺了 → 装一个就好。
 
-1. 查注册表，没找到 WebView2。
-2. 去官网下安装包。
-3. 命令行静默安装，被 UAC 拦下来。
-4. 手动下一个标着 x64 的安装包，双击报「不兼容」。一看文件头，是 32 位的，架构不对。
-5. 换成官方那个小体积的引导安装程序（1.86 MB），跑起来，它弹出一句：**已经安装了**。
+于是查注册表（没找到）、下安装包、静默安装（被 UAC 拦）、换独立安装包（双击报「不兼容」，一看文件头是 32 位的）、最后换官方引导程序，它弹出一句：**已经安装了**。
 
-到这一步才回头看：WebView2 早就装在 `C:\Program Files (x86)\Microsoft\EdgeWebView\Application\` 里了。我一开始查注册表只查了某一个固定路径，没命中，就误判成「没装」。
+WebView2 一直躺在 `C:\Program Files (x86)\Microsoft\EdgeWebView\Application\` 里。我第一遍只查了其中一个注册表位置，没命中就下了「没装」的结论。
 
-::: warning 我踩的坑
-「缺运行库」是个有完整因果链的假设，看着最合理，所以最容易一头扎进去。查注册表没查到，不等于没装——它有多个注册位置，还有安装目录本身。
+::: warning 踩坑
+「缺运行库」有完整因果链，看着最合理，也最容易一头扎进去。注册表查不到不等于没装，它有多个注册位置，还有安装目录本身。
 :::
 
-## 换方向：先读崩溃日志
+## 第二轮：查到 libcef，却判给了显卡
 
-这个方向走死后，我换了个更笨的办法：直接问系统，到底是谁崩的。
-
-Windows 事件日志里躺着答案：
+换个笨办法，直接问系统谁崩的：
 
 ```powershell
-# 查最近三小时的应用错误事件
-Get-WinEvent -FilterHashtable @{LogName='Application'; Level=2; StartTime=(Get-Date).AddHours(-3)}
+Get-WinEvent -FilterHashtable @{LogName='Application'; Id=1000; StartTime=(Get-Date).AddDays(-30)}
 ```
 
-事件写得很清楚：崩溃的程序是 `wallpaperui.exe`（就是那个界面进程），**崩溃模块是 `libcef.dll`**，异常代码 `0x80000003`。
+日志写得很清楚：出错模块 `libcef.dll`，异常代码 `0x80000003`。这是断点 / 断言类崩溃，Chromium 里最常见的触发点是 GPU 初始化。
 
-`libcef.dll` 是 Wallpaper Engine 内置的 Chromium（CEF），界面全靠它渲染。所以「界面出不来」的直接原因，是这个进程在启动时崩了。
+最小验证也过了：手工加 `--disable-gpu` 启动 `wallpaperui.exe`，进程活下来了。于是把它写进 `config.json`，界面确实起来了。
 
-::: tip 崩溃日志里的模块名是第一手证据
-不用猜「可能缺了什么」「可能是驱动问题」。崩溃发生时，Windows 会记下崩掉的模块文件和异常代码。这是系统自己写的，比推理出来的任何假设都可靠。
-:::
+**这个「修好了」只持续了三天。**
 
-## 验证：把 GPU 关掉再启一次
+## 复发：三条排除线全断
 
-`0x80000003` 是断点 / 断言类的崩溃，Chromium 里最常见的触发点是 GPU 初始化。做一个最小验证：手工用「禁用 GPU」的参数单独启动那个界面进程。
+第二次打不开时，配置里的两个开关还在（`uihardwareacceleration: false`、`cefcommandline: --disable-gpu`），说明不是配置被覆盖。
+
+于是把 GPU 这条假设彻底压测一遍：
+
+| 启动参数 | 结果 |
+| --- | --- |
+| `--disable-gpu` | 崩 |
+| `--disable-gpu --disable-gpu-compositing` | 崩 |
+| `--disable-gpu --use-angle=swiftshader`（纯软件渲染） | 崩 |
+| `--no-sandbox` | 崩 |
+| 全新 `--user-data-dir`（空配置） | 崩 |
+
+完全禁用 GPU、纯软件渲染、不用沙箱、空 profile，四条路全崩。**那它就不是 GPU 的事。**
+
+## 转折：程序自己的日志停在某天
+
+`bin\wallpaperuilog.txt` 最后一行是 `2026-10-12 00:55 UI CEF shutdown`，此后再也没有新内容——包括之后每一次崩溃。
+
+程序连自己的日志都写不出来，说明它死在日志文件打开之前。**是初始化最早期就失败，不是跑到一半出错。**
+
+顺着这个方向查目录权限，拿到两个硬证据。
+
+第一个是 ACL：
+
+| 身份 | 对 `ui` 目录的权限 |
+| --- | --- |
+| `Authenticated Users` | 只读 |
+| `Users` | 只读 |
+| `SYSTEM` / `Administrators` | 完全控制 |
+| 所有者 | `BUILTIN\Administrators` |
+
+第二个是实测——ACL 可能骗人，所以直接写：
 
 ```powershell
-Start-Process "...\wallpaper_engine\bin\wallpaperui.exe" -ArgumentList "--disable-gpu"
+$p = "E:\steam\steamapps\common\wallpaper_engine\ui\uicache\__probe.tmp"
+try { [System.IO.File]::WriteAllText($p, "x"); "可写" } catch { "拒绝: $($_.Exception.Message)" }
 ```
 
-进程活下来了。之前每次启动必崩，加了参数之后稳定存在。
+结果：**访问被拒绝**。
 
-根因确认：**界面进程崩在 GPU 硬件加速路径上**——内置 Chromium 的加速和这台机器的显卡 / 驱动组合冲突。
+## 因果链
 
-## 修：把参数写进配置
+CEF 启动时必须在配置目录里创建一个 `SingletonLock` 锁文件，防止同一个 profile 被两个进程同时打开。建不了锁文件，`ProcessSingleton` 初始化失败，libcef 断言失败直接断点退出。
 
-手工加参数只管一次。要让每次启动都生效，得写进 Wallpaper Engine 自己的配置 `config.json`：
-
-```jsonc
-// 关掉界面的硬件加速
-"uihardwareacceleration" : false
-
-// 给内置 Chromium 加禁用 GPU 的参数
-"cefcommandline" : "--disable-gpu"
+```
+ui\uicache 不可写
+  → SingletonLock 创建失败（ERROR 5 拒绝访问）
+  → ProcessSingleton 初始化失败
+  → libcef 断言 → 0x80000003 → 进程立即退出
+  → 主窗口 / 托盘图标都出不来
 ```
 
-这里还有个小麻烦：配置文件被 SYSTEM 权限的后台服务锁着，普通权限改不动，得先停服务、改完再启。
-
-我把这一串操作整理成了脚本：双击、提权、自动检测安装路径、备份配置、改完重启，一次跑完。和之前那个[超星课件下载器](./2026-09-16-chaoxing-course-downloader.md)是一个路子——把一次折腾固化成零依赖小工具。
-
-## 一开始的判断 vs 实际原因
+壁纸渲染是 `wallpaper64.exe` 干的活，它不碰这个目录。所以壁纸照常播放，只有界面没了。
 
 <DiagramWeTroubleshoot />
 
-| 环节 | 我一开始的判断 | 实际是什么 |
-| --- | --- | --- |
-| 界面打不开 | 缺 WebView2 运行时 | WebView2 早就装了，注册表查的位置不对 |
-| 下安装包失败 | 网络或权限问题 | 下到了 32 位包，架构不对 |
-| 崩溃原因 | 界面组件缺失 | `libcef.dll` 的 GPU 加速路径崩了，异常码 `0x80000003` |
-| 怎么修 | 装运行库 | 关掉 `uihardwareacceleration`，加 `--disable-gpu` |
+三种解释各能说明什么，摊开对比就很清楚：
 
-四个环节里，前两个都把时间花在了错的方向上。共同点是：**第一反应都是「缺了个东西」，而没有先去问「到底哪里崩了」。**
+| 解释 | 能说明 | 说明不了 |
+| --- | --- | --- |
+| 缺 WebView2 | Web 类壁纸黑屏报错 | 界面进程秒退；而且本机早就装了 |
+| 显卡 / 驱动冲突 | libcef 断言崩溃 | 纯软件渲染、无沙箱、空 profile 照样崩；也解释不了日志一个字没写 |
+| 配置目录不可写 | 死在写日志之前、壁纸不受影响、实测被拒 | —— |
+
+## 修复：加一条权限，不删任何东西
+
+需要管理员权限，因为要改 DACL，而当前账户在那个目录上恰好只有读。
+
+```batch
+icacls "E:\steam\steamapps\common\wallpaper_engine\ui" /grant "%USERNAME%:(OI)(CI)F" /T /C /Q
+```
+
+跑完 `Successfully processed 2032 files; Failed 0`。重启后界面进程稳定存活，之后没再产生新的崩溃转储。
+
+::: tip 为什么不需要先备份
+`/grant` 是**追加**一条授权，原有权限条目一条都不改动。没有东西被删除，也就没有东西需要还原。
+:::
+
+真正会动到历史的做法是 `/reset`（把整棵树重置成继承状态），它才是必须先把 ACL 导出来备份的那种操作：
+
+| 做法 | 要不要备份 | 处理范围 | 回退方式 |
+| --- | --- | --- | --- |
+| `icacls /reset /T` | 要，会删掉原有条目 | 整棵树，7.8 万个文件 | 只能靠备份还原 |
+| **`icacls /grant` 追加** | **不要** | 只改目标目录，子项靠继承 | 一条 `/remove:g` |
+
+顺带说一句：`icacls /save` 导出的是权限描述文本，不是文件副本，全树也就 27 MB、32 万行。真要备份也不占地方。
+
+## 同一个病，Steam 库也中了
+
+修完界面才发现，这台机器上 Steam 库也有一样的毛病：不以管理员身份运行 Steam，就无法更新游戏，提示没有权限。
+
+| 位置 | 状态 |
+| --- | --- |
+| `E:\steam` | `Users` 完全控制，正常 |
+| `E:\steam\steamapps` | **阻止继承 + `Users` 只读**，问题源头 |
+| 下面 39 个游戏目录 | 34 个继承成只读 |
+
+`steamapps` 这一层的所有者是当前用户，所以不需要提权就能把它拉回继承。改完之后只有顶层生效，子目录要靠 Windows 自动传递：
+
+```batch
+icacls "E:\steam\steamapps\common" /grant *S-1-5-32-545:(OI)(CI)M /C /Q
+```
+
+`*S-1-5-32-545` 是 `BUILTIN\Users` 的 SID，用 SID 可以避开中文系统上组名解析的坑。最后 39 个目录逐个实测写入，全部通过。
+
+::: warning 别再以管理员身份运行 Steam
+这两处权限坏掉，最可能的成因就是以管理员身份运行过 Steam / Wallpaper Engine。正常安装的 Steam 库，普通账户本来就能读写。用管理员跑一次，它重建目录时可能把所有者改成管理员组，之后就再也写不进去。
+:::
 
 ## 一句结论
 
-遇到「程序还在跑、界面出不来」，第一件事不是猜它缺什么，是去 Windows 事件日志看一眼崩溃模块名，它会直接告诉你往哪查。
+界面打不开、壁纸却正常，说明进程不是跑崩的，是**在初始化最早期就退出了**。去看它自己的日志有没有「停在某一天不动」，比猜驱动和运行库有效得多。
 
-如果崩在 `libcef.dll`，先怀疑 GPU 硬件加速，再怀疑显卡驱动。
+日志不写 + 目录写不进，就是权限。修法只需要加一条授权，不必重置，也不必备份。
