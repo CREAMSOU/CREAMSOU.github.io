@@ -1,71 +1,43 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 
-// 这个页面长在线上博客里，但真正干活的服务在本机 127.0.0.1:8891。
-// 打开页面先探测一次：能连上就把控制台嵌进来，连不上就给出启动步骤并自动重试。
-const STATE = ref('checking')   // checking | on | off
+// 这个页面长在线上博客里，真正干活的服务在本机 127.0.0.1:8891。
+// 新版 Chrome 默认不允许网页直接访问本机服务（Local Network Access），
+// 所以这里不自动探测：默认给「新窗口打开」，用户点一下才尝试嵌进本页。
+const LOCAL = 'http://127.0.0.1:8891/'
+const STATE = ref('idle')   // idle | checking | on | off
 const frameKey = ref(0)
 const file = ref('')
-let timer = null
-let tries = 0
-
-const LOCAL = 'http://127.0.0.1:8891/'
 
 const localUrl = computed(() =>
   file.value ? LOCAL + '?file=' + encodeURIComponent(file.value) : LOCAL)
 
 const stateText = computed(() => ({
-  checking: '正在连接本机控制台…',
-  on: '已连接本机控制台 · 数据不出这台电脑',
-  off: '没检测到本机控制台'
+  idle: '控制台是在这台电脑上单独跑的程序',
+  checking: '正在连接…',
+  on: '已连上本机控制台 · 数据不出这台电脑',
+  off: '浏览器没放行这次访问，用新窗口打开'
 }[STATE.value]))
 
-async function ping() {
+async function embed() {
+  STATE.value = 'checking'
   const ctl = new AbortController()
-  const t = setTimeout(() => ctl.abort(), 1500)
+  const t = setTimeout(() => ctl.abort(), 2500)
   try {
     const r = await fetch(LOCAL + 'api/ping', { signal: ctl.signal, cache: 'no-store' })
-    if (!r.ok) return false
-    const d = await r.json()
-    return d && d.app === 'blog-editor'
+    const d = r.ok ? await r.json() : null
+    if (d && d.app === 'blog-editor') { STATE.value = 'on'; frameKey.value++ }
+    else STATE.value = 'off'
   } catch {
-    return false
+    STATE.value = 'off'
   } finally {
     clearTimeout(t)
   }
 }
 
-async function check() {
-  if (STATE.value !== 'on') STATE.value = 'checking'
-  const ok = await ping()
-  STATE.value = ok ? 'on' : 'off'
-  if (ok) {
-    clearInterval(timer)
-    timer = null
-    frameKey.value++
-  } else if (!timer) {
-    // 打开页面后再去启动控制台，这里会自动接上，不用手动刷新
-    tries = 0
-    timer = setInterval(async () => {
-      tries++
-      if (await ping()) {
-        clearInterval(timer)
-        timer = null
-        STATE.value = 'on'
-        frameKey.value++
-      } else if (tries >= 30) {
-        clearInterval(timer)
-        timer = null
-      }
-    }, 2000)
-  }
-}
-
 onMounted(() => {
   file.value = new URLSearchParams(location.search).get('file') || ''
-  check()
 })
-onBeforeUnmount(() => { if (timer) clearInterval(timer) })
 </script>
 
 <template>
@@ -74,8 +46,8 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
       <span class="ce-dot" :class="STATE"></span>
       <span class="ce-txt">{{ stateText }}</span>
       <span class="ce-grow"></span>
+      <button v-if="STATE !== 'on'" class="ce-btn" @click="embed">在本页嵌入</button>
       <a class="ce-btn" :href="localUrl" target="_blank" rel="noreferrer">新窗口打开 ↗</a>
-      <button class="ce-btn" @click="check">重新检测</button>
     </div>
 
     <iframe
@@ -87,24 +59,24 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
     ></iframe>
 
     <div v-else class="ce-off">
-      <h2>{{ STATE === 'checking' ? '正在连接…' : '没连上本机控制台' }}</h2>
-      <p v-if="STATE === 'off'">
-        控制台只在这台电脑上跑。线上站点是静态页，自己连不上本机服务，得先把它启动起来。
+      <h2>控制台跑在本机，线上博客启不动它</h2>
+      <p>
+        博客只是个静态页面。要改文章，得让这台电脑上的控制台程序跑起来，然后从本机打开它。
       </p>
-      <ol v-if="STATE === 'off'">
-        <li>打开 <code>blog\editor</code> 文件夹</li>
-        <li>双击 <code>editor.bat</code>，第一次会让你设一个密码</li>
-        <li>回到这个页面——两秒内会自动接上，不用刷新</li>
+      <ol>
+        <li>打开 <code>blog\editor</code> 文件夹，双击 <code>editor.bat</code>（第一次会让你设密码）</li>
+        <li>控制台会自己弹出一个浏览器标签页，那就是编辑界面</li>
+        <li>想让它嵌回这个页面，点右上角「在本页嵌入」</li>
       </ol>
-      <p v-if="STATE === 'off'" class="ce-note">
-        已经启动过还是连不上？多半是浏览器把网页请求本机的通道拦了。点下面按钮在新窗口打开，一定能进。
-        这个页面只探测 <code>127.0.0.1:8891</code> 的通断，不会把文章或密码发到任何地方。
+      <p class="ce-note">
+        新版 Chrome 默认不许网页访问本机服务，会弹「本地网络访问」授权，点允许才能嵌。
+        不授权也没关系——新窗口打开一样用，只是少一个页面框。
       </p>
       <div class="ce-actions">
         <a class="ce-btn ce-primary" :href="localUrl" target="_blank" rel="noreferrer">
-          在新窗口打开控制台 ↗
+          打开控制台 ↗
         </a>
-        <button class="ce-btn" @click="check">重新检测</button>
+        <button class="ce-btn" @click="embed">在本页嵌入</button>
       </div>
     </div>
   </div>

@@ -360,7 +360,9 @@ class Handler(BaseHTTPRequestHandler):
         # 只允许本站 / 本地开发 / 线上博客把它嵌进 iframe，别的网站嵌不了
         self.send_header('Content-Security-Policy',
                          "frame-ancestors 'self' https://creamsou.github.io "
-                         "http://localhost:5173 http://127.0.0.1:5173")
+                         "http://localhost:5173 http://127.0.0.1:5173 "
+                         "http://localhost:4173 http://127.0.0.1:4173 "
+                         "http://localhost:5199 http://127.0.0.1:5199")
         self.send_header('Content-Length', str(len(data)))
         self.end_headers()
         self.wfile.write(data)

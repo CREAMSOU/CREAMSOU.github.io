@@ -577,45 +577,39 @@ html.sb-hide .sb-toggle {
   color: var(--vp-c-brand-1);
 }
 
-/* ===== 导航栏：本机控制台入口（常驻，圆点表示本机服务在不在跑） ===== */
+/* ===== 导航栏：博客控制台入口（常驻） ===== */
 .console-nav {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  height: var(--vp-nav-height);
+  align-self: center;
+  height: 30px;
+  margin: 0 4px 0 8px;
   padding: 0 12px;
-  font-size: 14px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 999px;
+  font-size: 13px;
   font-weight: 500;
+  line-height: 1;
   color: var(--vp-c-text-1);
   text-decoration: none;
-  transition: color 0.2s;
+  transition: color 0.2s, border-color 0.2s;
 }
 
 .console-nav:hover {
   color: var(--vp-c-brand-1);
+  border-color: var(--vp-c-brand-1);
   text-decoration: none;
-}
-
-.console-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #22c55e;
-  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.15);
-}
-
-/* 本机控制台没在跑：灰点，入口仍然可点 */
-.console-dot.off {
-  background: var(--vp-c-text-3);
-  box-shadow: 0 0 0 3px rgba(120, 120, 120, 0.12);
 }
 
 .console-nav-mobile {
   display: flex;
   height: auto;
   padding: 12px 0;
-  margin-top: 8px;
+  margin: 8px 0 0;
+  border: 0;
   border-top: 1px solid var(--vp-c-divider);
+  border-radius: 0;
+  font-size: 14px;
   font-weight: 600;
 }
 
@@ -752,9 +746,15 @@ html.sb-hide .sb-toggle {
 .ce-off ol {
   margin: 0 0 16px;
   padding-left: 22px;
+  list-style: decimal;
   color: var(--vp-c-text-2);
   line-height: 2;
   font-size: 14.5px;
+}
+
+.ce-off ol li {
+  list-style: decimal;
+  margin: 0;
 }
 
 .ce-off code {
