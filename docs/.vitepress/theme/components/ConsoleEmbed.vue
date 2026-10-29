@@ -87,9 +87,9 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
     ></iframe>
 
     <div v-else class="ce-off">
-      <h2>{{ STATE === 'checking' ? '正在连接…' : '控制台没在运行' }}</h2>
+      <h2>{{ STATE === 'checking' ? '正在连接…' : '没连上本机控制台' }}</h2>
       <p v-if="STATE === 'off'">
-        控制台只在这台电脑上跑。线上站点是个静态页，自己连不上本机服务，所以才需要你先把它启动起来。
+        控制台只在这台电脑上跑。线上站点是静态页，自己连不上本机服务，得先把它启动起来。
       </p>
       <ol v-if="STATE === 'off'">
         <li>打开 <code>blog\editor</code> 文件夹</li>
@@ -97,11 +97,14 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
         <li>回到这个页面——两秒内会自动接上，不用刷新</li>
       </ol>
       <p v-if="STATE === 'off'" class="ce-note">
-        这个页面只请求 <code>127.0.0.1:8891</code> 的连通状态，不会把文章或密码发到任何地方。
+        已经启动过还是连不上？多半是浏览器把网页请求本机的通道拦了。点下面按钮在新窗口打开，一定能进。
+        这个页面只探测 <code>127.0.0.1:8891</code> 的通断，不会把文章或密码发到任何地方。
       </p>
       <div class="ce-actions">
-        <button class="ce-primary" @click="check">重新检测</button>
-        <a class="ce-btn" :href="localUrl" target="_blank" rel="noreferrer">直接打开控制台</a>
+        <a class="ce-btn ce-primary" :href="localUrl" target="_blank" rel="noreferrer">
+          在新窗口打开控制台 ↗
+        </a>
+        <button class="ce-btn" @click="check">重新检测</button>
       </div>
     </div>
   </div>
