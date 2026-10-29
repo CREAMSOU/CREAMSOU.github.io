@@ -4,7 +4,8 @@ import { withBase } from 'vitepress'
 
 defineProps({ mobile: { type: Boolean, default: false } })
 
-// 只在探测到本机控制台时才出现。别人打开这个站点看不到这个入口。
+// 入口常驻：点进去是 /console，那一页负责"连上了就嵌编辑器，没连上就给启动步骤"。
+// 圆点只表示本机控制台此刻是否在跑（绿=在跑，灰=没跑），不影响能不能点。
 const alive = ref(false)
 
 onMounted(() => {
@@ -13,19 +14,20 @@ onMounted(() => {
   fetch('http://127.0.0.1:8891/api/ping', { signal: ctl.signal, cache: 'no-store' })
     .then((r) => (r.ok ? r.json() : null))
     .then((d) => { if (d && d.app === 'blog-editor') alive.value = true })
-    .catch(() => { /* 没跑控制台：保持隐藏 */ })
+    .catch(() => { /* 没跑控制台：圆点保持灰色，入口照旧可点 */ })
     .finally(() => clearTimeout(timer))
 })
 </script>
 
 <template>
   <a
-    v-if="alive"
     class="console-nav"
     :class="{ 'console-nav-mobile': mobile }"
     :href="withBase('/console')"
-    title="本机控制台已连接，点开直接改文章"
+    :title="alive
+      ? '本机控制台在运行，点开直接改文章'
+      : '本机控制台没在运行，点开看怎么启动'"
   >
-    <span class="console-dot"></span>控制台
+    <span class="console-dot" :class="{ off: !alive }"></span>控制台
   </a>
 </template>
