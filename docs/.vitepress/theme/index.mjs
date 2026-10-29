@@ -5,11 +5,15 @@ import Lead from './components/Lead.vue'
 import EditBar from './components/EditBar.vue'
 import SidebarToggle from './components/SidebarToggle.vue'
 import PostMeta from './components/PostMeta.vue'
+import ConsoleNav from './components/ConsoleNav.vue'
+import ConsoleEmbed from './components/ConsoleEmbed.vue'
 import DiagramNarrative from './components/DiagramNarrative.vue'
 import DiagramPublish from './components/DiagramPublish.vue'
 import DiagramWeTroubleshoot from './components/DiagramWeTroubleshoot.vue'
 import DiagramDecommission from './components/DiagramDecommission.vue'
 import DiagramFaultLayers from './components/DiagramFaultLayers.vue'
+import DiagramMistakeKinds from './components/DiagramMistakeKinds.vue'
+import DiagramDataPaths from './components/DiagramDataPaths.vue'
 import DemoLagrange from './components/DemoLagrange.vue'
 import DemoError from './components/DemoError.vue'
 import './styles/custom.css'
@@ -20,6 +24,9 @@ export default {
     return h(DefaultTheme.Layout, null, {
       // 文章页底部：发布于/最后更新/修改记录
       'doc-after': () => h(PostMeta),
+      // 导航栏：检测到本机控制台时才出现「控制台」入口
+      'nav-bar-content-after': () => h(ConsoleNav),
+      'nav-screen-content-after': () => h(ConsoleNav, { mobile: true }),
       // 全站右下角：目录收起按钮 + 编辑器入口（有编辑器时显示"编辑此页"，本地开发模式一直显示）
       'layout-bottom': () => [h(SidebarToggle), h(EditBar)]
     })
@@ -29,14 +36,18 @@ export default {
     app.component('HomeHero', HomeHero)
     // 文章开头的"速览"卡片：<Lead :points="['…', '…']" />
     app.component('Lead', Lead)
-    // 正文配图（自带配色，跟随亮/暗主题）：<DiagramPublish /> / <DiagramNarrative />
+    // 正文配图（自带配色，跟随亮/暗主题）
     app.component('DiagramPublish', DiagramPublish)
     app.component('DiagramNarrative', DiagramNarrative)
     app.component('DiagramWeTroubleshoot', DiagramWeTroubleshoot)
     app.component('DiagramDecommission', DiagramDecommission)
     app.component('DiagramFaultLayers', DiagramFaultLayers)
+    app.component('DiagramMistakeKinds', DiagramMistakeKinds)
+    app.component('DiagramDataPaths', DiagramDataPaths)
     // 正文可交互演示（canvas，跟随亮/暗主题）：<DemoLagrange /> / <DemoError />
     app.component('DemoLagrange', DemoLagrange)
     app.component('DemoError', DemoError)
+    // /console 页面里嵌入本机控制台
+    app.component('ConsoleEmbed', ConsoleEmbed)
   }
 }

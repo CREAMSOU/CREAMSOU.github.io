@@ -25,6 +25,8 @@ ROOT = os.path.dirname(HERE)                       # blog/
 POSTS_DIR = os.path.join(ROOT, 'docs', 'posts')
 PAGE_FILE = os.path.join(HERE, 'index.html')
 AUTH_FILE = os.path.join(HERE, '.auth.json')       # 密码哈希，已在 .gitignore
+PREFS_FILE = os.path.join(HERE, '.prefs.json')     # 12 道写作偏好，本机
+MATERIAL_DIR = os.path.join(HERE, '.material')     # 每篇的事实清单 / 口述稿，本机
 HOST, PORT = '127.0.0.1', 8891
 SAFE_NAME = re.compile(r'^[0-9A-Za-z_\-]+\.md$')
 BAD_CAT = re.compile(r'[:#\n\r]')
@@ -118,6 +120,28 @@ def set_category(fname, cat):
         'category': cat, 'description': fm.get('description', ''),
         'top': 'true' if fm.get('top') == 'true' else ''
     }, body))
+
+
+# ---------------------------------------------------------------- 本机素材
+def read_json(path, default):
+    try:
+        with open(path, encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return default
+
+
+def write_json(path, obj):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', encoding='utf-8', newline='\n') as f:
+        json.dump(obj, f, ensure_ascii=False, indent=2)
+
+
+def material_path(fname):
+    if not SAFE_NAME.match(fname or ''):
+        return None
+    os.makedirs(MATERIAL_DIR, exist_ok=True)
+    return os.path.join(MATERIAL_DIR, fname[:-3] + '.json')
 
 
 # ---------------------------------------------------------------- 内容体检
@@ -333,6 +357,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header('Content-Type', 'text/html; charset=utf-8')
         self.send_header('Cache-Control', 'no-store')
+        # 只允许本站 / 本地开发 / 线上博客把它嵌进 iframe，别的网站嵌不了
+        self.send_header('Content-Security-Policy',
+                         "frame-ancestors 'self' https://creamsou.github.io "
+                         "http://localhost:5173 http://127.0.0.1:5173")
         self.send_header('Content-Length', str(len(data)))
         self.end_headers()
         self.wfile.write(data)
@@ -380,11 +408,15 @@ class Handler(BaseHTTPRequestHandler):
         if p in ('/', '/index.html'):
             return self._html(open(PAGE_FILE, encoding='utf-8').read())
 
-        # 探测端点：不返回任何内容数据，不需要登录
+        # 探测端点：不返回任何内容数据，不需要登录。
+        # 必须带 CORS 头，否则线上博客（https://creamsou.github.io）的 fetch 会被浏览器拦掉，
+        # 入口永远不会出现。
         if p == '/api/ping':
             return self._json({'ok': True, 'app': 'blog-editor',
                                'needSetup': load_auth() is None,
-                               'loggedIn': self._authed()})
+                               'loggedIn': self._authed()},
+                              headers=[('Access-Control-Allow-Origin', '*'),
+                                       ('Access-Control-Allow-Private-Network', 'true')])
 
         if p == '/api/auth':
             return self._json({'needSetup': load_auth() is None,
@@ -397,6 +429,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(read_posts())
         if p == '/api/audit':
             return self._json(audit_all())
+        if p == '/api/prefs':
+            return self._json(read_json(PREFS_FILE, {'answers': {}, 'updated': ''}))
+        if p == '/api/material':
+            f = parse_qs(u.query).get('file', [''])[0]
+            mp = material_path(f)
+            if not mp:
+                return self._json({'error': '非法文件名'}, 400)
+            return self._json(read_json(mp, {'facts': '', 'oral': '', 'updated': ''}))
         if p == '/api/post':
             f = parse_qs(u.query).get('file', [''])[0]
             if not SAFE_NAME.match(f):
@@ -476,6 +516,27 @@ class Handler(BaseHTTPRequestHandler):
             }, data.get('body', ''))
             open(fp, 'w', encoding='utf-8', newline='\n').write(md)
             return self._json({'ok': True, 'file': f})
+
+        # ---- 写作偏好（12 道选择题的答案）----
+        if p == '/api/prefs':
+            answers = data.get('answers')
+            if not isinstance(answers, dict):
+                return self._json({'error': 'answers 必须是对象'}, 400)
+            write_json(PREFS_FILE, {'answers': answers,
+                                    'updated': date.today().isoformat()})
+            return self._json({'ok': True})
+
+        # ---- 某篇文章的素材：事实清单 / 口述原文 ----
+        if p == '/api/material':
+            mp = material_path(data.get('file', ''))
+            if not mp:
+                return self._json({'error': '非法文件名'}, 400)
+            write_json(mp, {
+                'facts': str(data.get('facts') or '')[:200000],
+                'oral': str(data.get('oral') or '')[:200000],
+                'updated': date.today().isoformat(),
+            })
+            return self._json({'ok': True})
 
         # ---- 批量移动文章到某个分类 ----
         if p == '/api/post/move':

@@ -159,6 +159,48 @@ main{flex:1;min-height:0;display:flex}
 .adetail .ctx{color:var(--dim);font-size:12.5px}
 .adetail .good{color:var(--ok)}
 
+/* ===== 写作偏好 ===== */
+#prefs{flex:1;overflow-y:auto;padding:0 0 28px}
+.prefbar{position:sticky;top:0;z-index:5;background:#fff;border-bottom:1px solid var(--line);
+  padding:12px 16px;display:flex;align-items:center;gap:12px}
+.prefbar .ptitle{font-size:14px;font-weight:650}
+.prefbar .ptip{color:var(--dim);font-size:12.5px;line-height:1.6}
+.prefbar .grow{flex:1}
+.prefbar .pcount{color:var(--dim);font-size:12.5px;font-variant-numeric:tabular-nums}
+#preflist{padding:16px;display:flex;flex-direction:column;gap:10px;max-width:940px}
+.pq{background:#fff;border:1px solid var(--line);border-radius:11px;padding:13px 15px}
+.pq .qh{display:flex;gap:9px;align-items:baseline;margin-bottom:8px}
+.pq .qn{flex:0 0 22px;height:22px;border-radius:50%;background:#eef2f7;color:#5b6472;
+  font-size:11.5px;display:flex;align-items:center;justify-content:center}
+.pq .qt{font-size:13.5px;font-weight:600}
+.pq .opts{display:flex;flex-direction:column;gap:4px;padding-left:31px}
+.pq label{display:flex;gap:8px;align-items:flex-start;font-size:13px;color:#3d444d;
+  cursor:pointer;padding:4px 7px;border-radius:6px}
+.pq label:hover{background:#f6f8fa}
+.pq label.on{background:#eff6ff;color:#1e40af}
+.pq input[type=radio]{margin-top:3px;accent-color:#2563eb}
+#prefout{display:none;margin:0 16px 16px;background:#1f2328;color:#cfe3cf;border-radius:10px;
+  padding:12px 14px;font:12px/1.75 Consolas,monospace;white-space:pre-wrap;max-height:300px;overflow:auto}
+
+/* ===== 素材弹窗 ===== */
+#matmask{position:fixed;inset:0;background:rgba(16,24,40,.42);z-index:70;display:none;
+  align-items:center;justify-content:center}
+#matmask.on{display:flex}
+.matbox{width:min(920px,92vw);max-height:88vh;background:#fff;border-radius:14px;
+  display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(16,24,40,.25)}
+.mathead{display:flex;align-items:center;gap:10px;padding:13px 16px;border-bottom:1px solid var(--line)}
+.mathead b{font-size:14px}
+.mathead .mtip{color:var(--dim);font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.matbody{padding:14px 16px;overflow-y:auto}
+.matbody h4{font-size:12.5px;color:var(--dim);margin:0 0 6px;display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.matbody h4 .hint{font-weight:400;color:var(--dim2);font-size:11.5px}
+.matbody textarea{width:100%;font:13px/1.7 Consolas,"Cascadia Mono",monospace;resize:vertical}
+.matbody textarea#m_facts{height:150px}
+.matbody textarea#m_oral{height:130px}
+.matbody textarea:last-of-type{margin-bottom:0}
+.matfoot{display:flex;gap:8px;align-items:center;padding:12px 16px;border-top:1px solid var(--line);background:#fafbfc}
+.matfoot .mcount{color:var(--dim);font-size:12.5px;font-variant-numeric:tabular-nums}
+
 /* ===== toast ===== */
 #toast{position:fixed;right:18px;bottom:18px;z-index:80;display:flex;flex-direction:column;gap:8px;align-items:flex-end}
 #toast div{background:#1f2328;color:#fff;border-radius:9px;padding:9px 14px;font-size:13px;
@@ -190,6 +232,7 @@ main{flex:1;min-height:0;display:flex}
       <button id="tab_board" class="on" onclick="switchView('board')">分类看板</button>
       <button id="tab_edit" onclick="switchView('edit')">文章编辑</button>
       <button id="tab_audit" onclick="switchView('audit')">内容体检</button>
+      <button id="tab_prefs" onclick="switchView('prefs')">写作偏好</button>
     </div>
     <div class="grow"></div>
     <button onclick="loadAll()">刷新</button>
@@ -224,6 +267,7 @@ main{flex:1;min-height:0;display:flex}
         <div id="e_preview"></div>
       </div>
       <div class="erow">
+        <button onclick="openMat()">素材（事实 / 口述）</button>
         <button class="primary" onclick="savePost(false)">保存</button>
         <button onclick="savePost(true)">保存并发布</button>
         <button onclick="switchView('board')">← 回看板</button>
@@ -243,6 +287,22 @@ main{flex:1;min-height:0;display:flex}
       </div>
       <div id="auditlist"></div>
     </div>
+
+    <!-- 写作偏好：12 道选择题 -->
+    <div id="prefs" class="hidden">
+      <div class="prefbar">
+        <div>
+          <span class="ptitle">写作偏好</span>
+          <span class="ptip">12 道题，只点不写。答案只存本机，写文章时按这套规则来。</span>
+        </div>
+        <span class="grow"></span>
+        <span class="pcount" id="prefcount">0 / 12</span>
+        <button onclick="savePrefs()">保存</button>
+        <button onclick="makePrefsText()">生成规则文本</button>
+      </div>
+      <div id="preflist"></div>
+      <pre id="prefout"></pre>
+    </div>
   </main>
 </div>
 
@@ -251,6 +311,28 @@ main{flex:1;min-height:0;display:flex}
   <select id="sel_cat"></select>
   <button class="primary" style="background:#2563eb;border-color:#2563eb" onclick="moveSelected()">移动</button>
   <button onclick="clearSel()">取消</button>
+</div>
+<!-- ===== 素材弹窗 ===== -->
+<div id="matmask" onclick="if(event.target===this)closeMat()">
+  <div class="matbox">
+    <div class="mathead">
+      <b>素材</b>
+      <span class="mtip" id="mat_title"></span>
+      <button class="ghost" onclick="closeMat()">关闭</button>
+    </div>
+    <div class="matbody">
+      <h4>① 事实清单 <span class="hint">10 条以上：几点、什么命令、报什么错、数字多少、当时说了什么</span></h4>
+      <textarea id="m_facts" placeholder="1. 10 月 12 日晚上开始，命令行报 XXX&#10;2. 换个参数后还是报同样的错&#10;3. ……"></textarea>
+      <h4>② 口述原文 <span class="hint">手机录音转文字后直接粘进来，不用润色，口语最好</span></h4>
+      <textarea id="m_oral" placeholder="想到哪说到哪。这段是给写文章的人看的原始材料，不会发布。"></textarea>
+    </div>
+    <div class="matfoot">
+      <span class="mcount" id="m_count"></span>
+      <span style="flex:1"></span>
+      <button onclick="closeMat()">取消</button>
+      <button class="primary" onclick="saveMat()">保存素材</button>
+    </div>
+  </div>
 </div>
 <div id="toast"></div>
 
@@ -489,10 +571,11 @@ function switchView(v){
   $('board').classList.toggle('hidden', v !== 'board');
   $('editor').classList.toggle('on', v === 'editor');
   $('audit').classList.toggle('hidden', v !== 'audit');
-  $('tab_board').classList.toggle('on', v === 'board');
-  $('tab_edit').classList.toggle('on', v === 'editor');
-  $('tab_audit').classList.toggle('on', v === 'audit');
+  $('prefs').classList.toggle('hidden', v !== 'prefs');
+  const map = {board:'board', edit:'editor', audit:'audit', prefs:'prefs'};
+  for (const k in map) $('tab_' + k).classList.toggle('on', map[k] === v);
   if (v === 'audit') renderAudit();
+  if (v === 'prefs') renderPrefs();
 }
 
 /* ==================== 内容体检 ==================== */
@@ -576,6 +659,7 @@ async function editPost(f){
   $('e_body').value = p.body || '';
   $('status').textContent = '';
   checkTitle(); renderPreview(); switchView('edit');
+  loadMat();
 }
 function newPost(){
   const today = new Date().toISOString().slice(0,10);
@@ -622,7 +706,7 @@ async function publish(){
   toast(p.ok ? '发布成功，等 1–2 分钟' : '发布失败，检查日志', p.ok ? 'ok' : 'err');
   if (!p.ok) { switchView('edit'); $('status').textContent = p.log || '发布失败'; }
 }
-function openSite(){ window.open('http://localhost:5173', '_blank'); }
+function openSite(){ window.open('https://creamsou.github.io', '_blank'); }
 
 /* ==================== Markdown 预览 ==================== */
 function esc2(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
@@ -696,6 +780,139 @@ $('e_body').addEventListener('input', () => { clearTimeout(pt); pt = setTimeout(
 $('e_body').addEventListener('click', syncPreview);
 $('e_body').addEventListener('keyup', syncPreview);
 
+/* ==================== 写作偏好 ==================== */
+const QUESTIONS = [
+  {id:'para', q:'一句话能单独成段吗？', opts:[
+    ['ok','能，经常这么写','允许 1–2 句成段，长短段混着来'],
+    ['some','偶尔可以','大多数段落 3–5 句，关键结论可以单独一句'],
+    ['no','尽量别','每段至少 3 句，不写碎片段']]},
+  {id:'sent', q:'句子长度怎么配？', opts:[
+    ['mix','长短交替，短句为主','长短句交替，短句占多数，平均句长 15–25 字'],
+    ['short','尽量短','每句 20 字以内，少用从句'],
+    ['long','可以写长句','允许 40 字以上的复句，但一段里不超过一句']]},
+  {id:'me', q:'第一人称「我」用多少？', opts:[
+    ['much','大量用，写自己的判断','大量使用“我”，写自己的选择和判断'],
+    ['mid','适度','适度使用，叙述事实为主，判断处用“我”'],
+    ['none','尽量不出现','避免第一人称，用“这次”“本文”']]},
+  {id:'wrong', q:'写不写自己判断错的地方？', opts:[
+    ['must','必须写，只要发生过','只要有误判就写出来：错在哪一步、为什么当时信了'],
+    ['some','有就写，不硬凑','有真实误判就写，没有不编'],
+    ['no','不写','只写做对的过程']]},
+  {id:'num', q:'数字给到什么精度？', opts:[
+    ['exact','具体到个位/小数','关键数字给具体值，必要时到小数'],
+    ['round','取整就行','数字取整，避免小数'],
+    ['mag','只说量级','只说“十几个”“几百 MB”这类量级']]},
+  {id:'end', q:'文章结尾停在哪？', opts:[
+    ['fact','停在事实上','结尾停在最后一个事实或结果，不做总结'],
+    ['judge','给一句判断','结尾给一句自己的判断，但不喊口号'],
+    ['next','留个下一步','结尾写下一步要做什么']]},
+  {id:'meta', q:'比喻和成语能用吗？', opts:[
+    ['no','基本不用','不用成语和比喻，直接说事'],
+    ['few','少量生活化的','最多一两处生活化比喻，禁止长比喻'],
+    ['ok','可以用','可以用比喻帮助理解']]},
+  {id:'term', q:'术语第一次出现怎么处理？', opts:[
+    ['explain','当场用大白话解释','术语第一次出现，用一句大白话解释'],
+    ['assume','假设读者懂','默认读者懂，不再解释'],
+    ['link','给链接','术语给链接，不展开']]},
+  {id:'table', q:'什么时候用表格？', opts:[
+    ['always','有对比就建表','只要有两项以上对比，一律建表'],
+    ['multi','三列以上才建表','数据多于两列时用表'],
+    ['rare','少用','尽量用列表，少用表格']]},
+  {id:'h2', q:'小标题多密？', opts:[
+    ['dense','每 200–300 字一个','每 200–300 字一个小标题'],
+    ['section','一节一个','每个大部分一个小标题'],
+    ['rare','少用','尽量少用小标题，靠段落推进']]},
+  {id:'repeat', q:'同一结论可以重复吗？', opts:[
+    ['once','只说一次','同一结论只出现一次，不在结尾复述'],
+    ['twice','开头结尾各一次','开头点一次，结尾收一次'],
+    ['free','无所谓','不限制']]},
+  {id:'tone', q:'能不能直说情绪和评价？', opts:[
+    ['direct','可以，直说不爽/离谱','可以直说“这很离谱”“当时挺烦”，不端着'],
+    ['mild','克制一点','可以有情绪，但一句带过'],
+    ['none','完全中立','不写情绪和主观评价']]}
+];
+let PREFS = {answers:{}, updated:''};
+let MAT = {file:null, facts:'', oral:''};
+
+async function loadPrefs(){
+  const d = await api('/api/prefs');
+  PREFS = (d && typeof d === 'object' && d.answers) ? d : {answers:{}, updated:''};
+  renderPrefs();
+}
+function renderPrefs(){
+  const ans = PREFS.answers || {};
+  $('preflist').innerHTML = QUESTIONS.map((q, i) =>
+    '<div class="pq"><div class="qh"><span class="qn">' + (i+1) + '</span>' +
+      '<span class="qt">' + esc(q.q) + '</span></div><div class="opts">' +
+      q.opts.map(o =>
+        '<label class="' + (ans[q.id] === o[0] ? 'on' : '') + '">' +
+        '<input type="radio" name="q_' + q.id + '" value="' + o[0] + '"' +
+          (ans[q.id] === o[0] ? ' checked' : '') +
+          ' onchange="pickPref(\'' + q.id + '\',\'' + o[0] + '\')">' +
+        '<span><b style="font-weight:600">' + esc(o[1]) + '</b>' +
+        '<span style="color:#8b93a1"> — ' + esc(o[2]) + '</span></span></label>').join('') +
+    '</div></div>').join('');
+  const n = QUESTIONS.filter(q => ans[q.id]).length;
+  $('prefcount').textContent = n + ' / 12';
+}
+function pickPref(id, val){
+  PREFS.answers[id] = val;
+  renderPrefs();
+  $('prefout').style.display = 'none';
+}
+async function savePrefs(){
+  const r = await api('/api/prefs', {answers: PREFS.answers});
+  if (r.ok){ toast('写作偏好已保存（只在这台机器上）', 'ok'); PREFS.updated = new Date().toISOString().slice(0,10); }
+}
+function makePrefsText(){
+  const ans = PREFS.answers || {}, lines = ['## 写作偏好（控制台保存）'];
+  let missing = 0;
+  for (const q of QUESTIONS){
+    const o = q.opts.find(x => x[0] === ans[q.id]);
+    if (!o){ missing++; continue; }
+    lines.push('- ' + q.q + ' → ' + o[2]);
+  }
+  if (missing) lines.push('', '（还有 ' + missing + ' 题没答）');
+  const txt = lines.join('\n');
+  const out = $('prefout');
+  out.style.display = 'block'; out.textContent = txt;
+  if (navigator.clipboard) navigator.clipboard.writeText(txt).then(
+    () => toast('规则文本已复制', 'ok'), () => {});
+}
+
+/* ==================== 素材：事实清单 / 口述原文 ==================== */
+async function loadMat(){
+  if (!CUR) return;
+  const d = await api('/api/material?file=' + encodeURIComponent(CUR));
+  MAT = {file: CUR, facts: (d && d.facts) || '', oral: (d && d.oral) || ''};
+}
+function factCount(){
+  return ($('m_facts').value || '').split(/\n/).filter(x => x.trim()).length;
+}
+function refreshMatCount(){
+  const n = factCount();
+  $('m_count').textContent = '事实 ' + n + ' 条' + (n >= 10 ? '（够了）' : '（建议 ≥10）') +
+    ' · 口述 ' + ($('m_oral').value || '').length + ' 字';
+}
+async function openMat(){
+  if (!CUR){ toast('先从看板选一篇文章', 'err'); return; }
+  if (MAT.file !== CUR) await loadMat();
+  $('mat_title').textContent = CUR;
+  $('m_facts').value = MAT.facts || '';
+  $('m_oral').value = MAT.oral || '';
+  refreshMatCount();
+  $('matmask').classList.add('on');
+}
+function closeMat(){ $('matmask').classList.remove('on'); }
+async function saveMat(){
+  if (!CUR){ toast('没有选中的文章', 'err'); return; }
+  const r = await api('/api/material', {file: CUR, facts: $('m_facts').value, oral: $('m_oral').value});
+  if (r.ok){ MAT = {file: CUR, facts: $('m_facts').value, oral: $('m_oral').value};
+    toast('素材已存本机（不会发布）', 'ok'); closeMat(); }
+}
+$('m_facts').addEventListener('input', refreshMatCount);
+$('m_oral').addEventListener('input', refreshMatCount);
+
 /* ==================== 启动 ==================== */
 (async function boot(){
   try {
@@ -706,6 +923,7 @@ $('e_body').addEventListener('keyup', syncPreview);
       $('gate').classList.add('hidden');
       $('app').classList.remove('hidden');
       await loadAll();
+      await loadPrefs();
       const q = new URLSearchParams(location.search).get('file');
       if (q) editPost(q.endsWith('.md') ? q : q + '.md');
     }

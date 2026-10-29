@@ -6,3 +6,6 @@ __pycache__/
 *.pyc
 # 控制台密码哈希：只存在本机，不进仓库
 editor/.auth.json
+# 写作偏好与每篇的素材（事实清单 / 口述稿）：只存在本机
+editor/.prefs.json
+editor/.material/
