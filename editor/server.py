@@ -1,31 +1,45 @@
 # -*- coding: utf-8 -*-
 """
-博客本地编辑器（零依赖：仅 Python 标准库）
-- 只监听 127.0.0.1，仅本机可访问
-- 功能：文章列表（按分类分组）/ 新建 / 编辑 / 实时预览 / 保存 / 整理分类 / 一键发布
-- /api/ping 带 CORS 头：线上博客页可以探测本机是否开着编辑器，探测到才显示"编辑此页"
+博客本地控制台（零依赖：仅 Python 标准库）
+- 只监听 127.0.0.1，外网访问不到
+- 首次打开设置一个密码，之后每次进控制台要登录（密码只存在本机 editor/.auth.json，不进仓库）
+- 功能：分类看板（拖拽改分类）/ 批量移动 / 分类改名合并 / 文章编辑 / 实时预览 / 一键发布
+- /api/ping 不需要登录：线上博客页靠它探测本机是否开着控制台
 启动：python editor/server.py  （或双击 blog/editor.bat）
 """
+import hashlib
 import json
 import os
 import re
+import secrets
 import subprocess
 import sys
+import time
 import webbrowser
 from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # blog/
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)                       # blog/
 POSTS_DIR = os.path.join(ROOT, 'docs', 'posts')
+PAGE_FILE = os.path.join(HERE, 'index.html')
+AUTH_FILE = os.path.join(HERE, '.auth.json')       # 密码哈希，已在 .gitignore
 HOST, PORT = '127.0.0.1', 8891
 SAFE_NAME = re.compile(r'^[0-9A-Za-z_\-]+\.md$')
+BAD_CAT = re.compile(r'[:#\n\r]')
 
 # frontmatter 按这个顺序输出；不在这张表里的字段（比如 updates）原样保留
 KNOWN_FM = ('title', 'date', 'category', 'description', 'top')
 KEY_RE = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*)\s*:')
 
+SESSION_TTL = 7 * 24 * 3600
+SESSIONS = {}          # token -> 过期时间戳
+FAILS = {'n': 0, 'until': 0.0}
+PBKDF2_ROUNDS = 200_000
 
+
+# ---------------------------------------------------------------- git / md
 def run_git(args):
     r = subprocess.run(['git'] + args, cwd=ROOT, capture_output=True,
                        text=True, encoding='utf-8', errors='replace', timeout=120)
@@ -55,7 +69,7 @@ def fm_blocks(lines):
 
 
 def parse_md(text):
-    """取字段值（多行字段只取首行，够用）+ 正文"""
+    """取字段值（多行字段只取首行）+ 正文"""
     lines, body = split_frontmatter(text)
     fm = {}
     for k, blk in fm_blocks(lines):
@@ -79,20 +93,237 @@ def render_md(old_text, values, body):
     return '---\n' + '\n'.join(out) + '\n---\n\n' + (body or '').strip() + '\n'
 
 
+def read_posts():
+    items = []
+    for f in sorted(os.listdir(POSTS_DIR)):
+        if not f.endswith('.md'):
+            continue
+        try:
+            fm, _ = parse_md(open(os.path.join(POSTS_DIR, f), encoding='utf-8').read())
+        except Exception:
+            continue
+        items.append({'file': f, 'title': fm.get('title', ''), 'date': fm.get('date', ''),
+                      'category': fm.get('category', ''), 'description': fm.get('description', ''),
+                      'top': fm.get('top') == 'true'})
+    items.sort(key=lambda x: (x['date'], x['file']), reverse=True)
+    return items
+
+
+def set_category(fname, cat):
+    p = os.path.join(POSTS_DIR, fname)
+    text = open(p, encoding='utf-8').read()
+    fm, body = parse_md(text)
+    open(p, 'w', encoding='utf-8', newline='\n').write(render_md(text, {
+        'title': fm.get('title', ''), 'date': fm.get('date', ''),
+        'category': cat, 'description': fm.get('description', ''),
+        'top': 'true' if fm.get('top') == 'true' else ''
+    }, body))
+
+
+# ---------------------------------------------------------------- 内容体检
+# 强信号：出现就基本是套话
+STRONG_PHRASES = [
+    '值得注意的是', '需要注意的是', '值得一提的是', '综上所述', '总而言之', '总的来说',
+    '这让我意识到', '这启示我们', '我们可以看到', '不难发现', '由此可见',
+    '赋能', '抓手', '全方位', '多维度',
+]
+# 弱信号：单独看不致命，密集出现才是问题
+WEAK_PHRASES = ['与此同时', '进一步', '从而', '更好地', '全面提升', '深刻', '显著', '有效地']
+# 需要上下文才成立的（避免「随着光标移动」这种误伤）
+PATTERNS = [
+    (r'随着.{0,14}的(?:不断)?(?:发展|推进|普及|深入|成熟)', '随着…的不断发展', 'strong'),
+    (r'具有重要的.{0,8}(?:意义|价值|作用)', '具有重要的…意义', 'strong'),
+    (r'不仅.{0,30}?而且', '不仅…而且', 'strong'),
+    (r'不是.{0,24}?而是', '不是…而是', 'weak'),
+]
+TITLE_RULE = '做了什么：领域 + 方法 + 解决什么问题'
+
+
+def _plain_body(text):
+    """去掉 frontmatter / 代码块 / 图片 / 容器标记，只留要读的正文"""
+    _, body = parse_md(text)
+    body = re.sub(r'```.*?```', '\n', body, flags=re.S)
+    body = re.sub(r'`[^`]*`', '', body)
+    body = re.sub(r'!\[[^\]]*\]\([^)]*\)', '', body)
+    body = re.sub(r'\[([^\]]*)\]\([^)]*\)', r'\1', body)
+    body = re.sub(r'^\s*:::\s*\w*\s*.*$', '', body, flags=re.M)
+    body = re.sub(r'^\s*#{1,6}\s+.*$', '', body, flags=re.M)
+    body = re.sub(r'^\s*\|.*$', '', body, flags=re.M)
+    body = re.sub(r'^\s*[-*+]\s+', '', body, flags=re.M)
+    body = re.sub(r'[>*_#`]', '', body)
+    return body.strip()
+
+
+def _stats(nums):
+    n = len(nums)
+    if not n:
+        return 0.0, 0.0
+    mean = sum(nums) / n
+    var = sum((x - mean) ** 2 for x in nums) / n
+    return mean, var ** 0.5
+
+
+def audit_text(title, text):
+    body = _plain_body(text)
+    paras = [p.strip() for p in re.split(r'\n\s*\n', body) if len(p.strip()) >= 20]
+    sents = [s.strip() for s in re.split(r'[。！？!?\n]+', body) if len(s.strip()) >= 6]
+
+    p_lens = [len(p) for p in paras]
+    s_lens = [len(s) for s in sents]
+    p_mean, p_sd = _stats(p_lens)
+    s_mean, s_sd = _stats(s_lens)
+
+    hits = []
+    for ph in STRONG_PHRASES:
+        for m in re.finditer(re.escape(ph), body):
+            ctx = body[max(0, m.start() - 10):m.end() + 14].replace('\n', ' ')
+            hits.append({'word': ph, 'level': 'strong', 'ctx': ctx, 'score': 7})
+    for ph in WEAK_PHRASES:
+        c = len(re.findall(re.escape(ph), body))
+        if c:
+            hits.append({'word': ph, 'level': 'weak', 'ctx': '', 'score': min(8, c * 2), 'count': c})
+    for pat, label, lv in PATTERNS:
+        for m in re.finditer(pat, body):
+            hits.append({'word': label, 'level': lv,
+                         'ctx': body[m.start():m.end()].replace('\n', ' '),
+                         'score': 7 if lv == 'strong' else 3})
+
+    # 破折号：每千字超过 3 个就算多（你之前也提过这个）
+    dash = body.count('——')
+    if dash >= 3:
+        per_k = dash * 1000 / max(1, len(body))
+        if per_k > 3:
+            hits.append({'word': '破折号', 'level': 'weak',
+                         'ctx': '全文 %d 处，每千字 %.1f 个' % (dash, per_k),
+                         'score': min(8, int(per_k))})
+
+    # 句首雷同：只统计中文开头，出现 3 次以上算节奏单调
+    opens = {}
+    for s in sents:
+        k = s.strip('“”"\'‘’ ,，、。！？!?；;：:')[0:2]
+        if len(k) == 2 and re.match(r'^[\u4e00-\u9fff]{2}$', k):
+            opens[k] = opens.get(k, 0) + 1
+    repeat = sorted([(k, v) for k, v in opens.items() if v >= 3],
+                    key=lambda x: -x[1])[:5]
+
+    # 标题体检
+    t = (title or '').strip()
+    t_issues = []
+    mm = re.match(r'^(.+?)[：:](.+)$', t)
+    if not mm:
+        t_issues.append('缺「：」，没写清做了什么/用什么方法解决什么问题')
+    else:
+        if len(mm.group(1).strip()) < 4:
+            t_issues.append('冒号前太短，没写清做了什么')
+        if len(mm.group(2).strip()) < 10:
+            t_issues.append('冒号后太短，没写清方法或问题')
+    if len(t) > 46:
+        t_issues.append('超过 46 字，首页卡片会换行')
+
+    score = min(40, sum(h['score'] for h in hits))
+    if len(s_lens) >= 8:
+        if s_sd < 8:
+            score += 32
+        elif s_sd < 11:
+            score += 22
+        elif s_sd < 14:
+            score += 12
+        elif s_sd >= 20:
+            score -= 5
+    if len(p_lens) >= 4 and p_mean:
+        cv = p_sd / p_mean
+        if cv < 0.3:
+            score += 18
+        elif cv < 0.45:
+            score += 8
+    score += min(15, sum(v - 2 for _, v in repeat) * 6)
+    score = max(0, min(100, score))
+
+    return {
+        'title': title, 'chars': len(re.sub(r'\s', '', body)),
+        'sents': len(sents), 'paras': len(paras),
+        's_mean': round(s_mean, 1), 's_sd': round(s_sd, 1),
+        'p_mean': round(p_mean, 1), 'p_cv': round((p_sd / p_mean) if p_mean else 0, 2),
+        's_max': max(s_lens) if s_lens else 0,
+        'hits': hits[:12], 'hit_total': len(hits),
+        'repeat': [{'open': k, 'n': v} for k, v in repeat],
+        'title_issues': t_issues, 'score': score,
+    }
+
+
+def audit_all():
+    out = []
+    for it in read_posts():
+        p = os.path.join(POSTS_DIR, it['file'])
+        try:
+            text = open(p, encoding='utf-8').read()
+        except Exception:
+            continue
+        a = audit_text(it['title'], text)
+        a.update({'file': it['file'], 'category': it['category'] or '未分类', 'date': it['date']})
+        out.append(a)
+    out.sort(key=lambda x: -x['score'])
+    return out
+
+
+
+# ---------------------------------------------------------------- 鉴权
+def load_auth():
+    try:
+        with open(AUTH_FILE, encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def save_password(password):
+    salt = secrets.token_hex(16)
+    dk = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), bytes.fromhex(salt), PBKDF2_ROUNDS)
+    with open(AUTH_FILE, 'w', encoding='utf-8') as f:
+        json.dump({'salt': salt, 'hash': dk.hex(),
+                   'created': date.today().isoformat()}, f)
+    try:
+        os.chmod(AUTH_FILE, 0o600)
+    except Exception:
+        pass
+
+
+def check_password(password):
+    a = load_auth()
+    if not a:
+        return False
+    dk = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'),
+                             bytes.fromhex(a['salt']), PBKDF2_ROUNDS)
+    return secrets.compare_digest(dk.hex(), a.get('hash', ''))
+
+
+def new_session():
+    tok = secrets.token_urlsafe(32)
+    SESSIONS[tok] = time.time() + SESSION_TTL
+    # 顺手清掉过期 token
+    for k, exp in list(SESSIONS.items()):
+        if exp < time.time():
+            SESSIONS.pop(k, None)
+    return tok
+
+
 class Handler(BaseHTTPRequestHandler):
     # ---- 响应工具 ----
     def _cors(self):
-        # 允许线上博客页（https）请求本机服务：
+        # 只给 /api/ping 用：线上博客页（https）请求本机服务探测。
         # http://127.0.0.1 属于浏览器认可的"可信来源"，不会被 Mixed Content 拦，
-        # 剩下的是跨源放行 + Chrome 私网访问（PNA）预检两个头。
+        # 剩下的是跨源放行 + Chrome 私网访问（PNA）预检。
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Access-Control-Allow-Private-Network', 'true')
 
-    def _json(self, obj, code=200):
+    def _json(self, obj, code=200, headers=None):
         data = json.dumps(obj, ensure_ascii=False).encode('utf-8')
         self.send_response(code)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
-        self._cors()
+        self.send_header('Cache-Control', 'no-store')
+        if headers:
+            for k, v in headers:
+                self.send_header(k, v)
         self.send_header('Content-Length', str(len(data)))
         self.end_headers()
         self.wfile.write(data)
@@ -101,24 +332,39 @@ class Handler(BaseHTTPRequestHandler):
         data = text.encode('utf-8')
         self.send_response(200)
         self.send_header('Content-Type', 'text/html; charset=utf-8')
+        self.send_header('Cache-Control', 'no-store')
         self.send_header('Content-Length', str(len(data)))
         self.end_headers()
         self.wfile.write(data)
 
-    def _read_posts(self):
-        items = []
-        for f in sorted(os.listdir(POSTS_DIR)):
-            if not f.endswith('.md'):
-                continue
-            fm, _ = parse_md(open(os.path.join(POSTS_DIR, f),
-                                  encoding='utf-8').read())
-            items.append({'file': f, 'title': fm.get('title', ''),
-                          'date': fm.get('date', ''),
-                          'category': fm.get('category', ''),
-                          'description': fm.get('description', '')})
-        items.sort(key=lambda x: x['date'], reverse=True)
-        return items
+    def _token(self):
+        for part in (self.headers.get('Cookie') or '').split(';'):
+            k, _, v = part.strip().partition('=')
+            if k == 'edt':
+                return v
+        return ''
 
+    def _authed(self):
+        tok = self._token()
+        exp = SESSIONS.get(tok)
+        return bool(exp and exp > time.time())
+
+    def _need_auth(self):
+        self._json({'error': '未登录', 'auth': False}, 401)
+        return None
+
+    def _body(self):
+        length = int(self.headers.get('Content-Length', 0) or 0)
+        raw = self.rfile.read(length) if length else b'{}'
+        try:
+            return json.loads(raw.decode('utf-8'))
+        except Exception:
+            return None
+
+    def log_message(self, *a):
+        pass
+
+    # ---- 路由 ----
     def do_OPTIONS(self):
         self.send_response(204)
         self._cors()
@@ -129,49 +375,98 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         u = urlparse(self.path)
-        if u.path in ('/', '/index.html'):
-            return self._html(PAGE)
-        # 供线上博客页探测"本机编辑器是否在运行"
-        if u.path == '/api/ping':
-            return self._json({'ok': True, 'app': 'blog-editor'})
-        if u.path == '/api/posts':
-            return self._json(self._read_posts())
-        if u.path == '/api/post':
+        p = u.path
+
+        if p in ('/', '/index.html'):
+            return self._html(open(PAGE_FILE, encoding='utf-8').read())
+
+        # 探测端点：不返回任何内容数据，不需要登录
+        if p == '/api/ping':
+            return self._json({'ok': True, 'app': 'blog-editor',
+                               'needSetup': load_auth() is None,
+                               'loggedIn': self._authed()})
+
+        if p == '/api/auth':
+            return self._json({'needSetup': load_auth() is None,
+                               'loggedIn': self._authed()})
+
+        if not self._authed():
+            return self._need_auth()
+
+        if p == '/api/posts':
+            return self._json(read_posts())
+        if p == '/api/audit':
+            return self._json(audit_all())
+        if p == '/api/post':
             f = parse_qs(u.query).get('file', [''])[0]
             if not SAFE_NAME.match(f):
                 return self._json({'error': '非法文件名'}, 400)
-            p = os.path.join(POSTS_DIR, f)
-            if not os.path.exists(p):
+            fp = os.path.join(POSTS_DIR, f)
+            if not os.path.exists(fp):
                 return self._json({'error': '文件不存在'}, 404)
-            fm, body = parse_md(open(p, encoding='utf-8').read())
+            fm, body = parse_md(open(fp, encoding='utf-8').read())
             return self._json({'file': f, 'title': fm.get('title', ''),
-                               'date': fm.get('date', ''),
-                               'category': fm.get('category', ''),
+                               'date': fm.get('date', ''), 'category': fm.get('category', ''),
                                'description': fm.get('description', ''),
-                               'top': fm.get('top') == 'true',
-                               'body': body})
-        if u.path == '/api/status':
-            code, out = run_git(['status', '--short'])
-            code2, out2 = run_git(['log', '--oneline', '-3'])
-            return self._json({'git_status': out or '(工作区干净)',
-                               'recent': out2})
+                               'top': fm.get('top') == 'true', 'body': body})
+        if p == '/api/status':
+            _, st = run_git(['status', '--short'])
+            _, lg = run_git(['log', '--oneline', '-3'])
+            return self._json({'git_status': st or '(工作区干净)', 'recent': lg})
+
         self.send_response(404)
         self.end_headers()
 
     def do_POST(self):
         u = urlparse(self.path)
-        length = int(self.headers.get('Content-Length', 0))
-        try:
-            data = json.loads(self.rfile.read(length).decode('utf-8'))
-        except Exception:
+        p = u.path
+        data = self._body()
+        if data is None:
             return self._json({'error': '请求体不是合法 JSON'}, 400)
 
-        if u.path == '/api/save':
+        # ---- 登录相关（无需已登录）----
+        if p == '/api/auth/setup':
+            if load_auth() is not None:
+                return self._json({'error': '密码已设置，不能重复初始化'}, 400)
+            pw = (data.get('password') or '').strip()
+            if len(pw) < 6:
+                return self._json({'error': '密码至少 6 位'}, 400)
+            save_password(pw)
+            tok = new_session()
+            return self._json({'ok': True}, headers=[
+                ('Set-Cookie', f'edt={tok}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSION_TTL}')])
+
+        if p == '/api/auth/login':
+            now = time.time()
+            if FAILS['until'] > now:
+                return self._json({'error': '试错次数太多，等一分钟再试'}, 429)
+            pw = data.get('password') or ''
+            if not check_password(pw):
+                FAILS['n'] += 1
+                if FAILS['n'] >= 5:
+                    FAILS['n'] = 0
+                    FAILS['until'] = now + 60
+                return self._json({'error': '密码不对'}, 401)
+            FAILS['n'] = 0
+            tok = new_session()
+            return self._json({'ok': True}, headers=[
+                ('Set-Cookie', f'edt={tok}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSION_TTL}')])
+
+        if p == '/api/auth/logout':
+            SESSIONS.pop(self._token(), None)
+            return self._json({'ok': True}, headers=[
+                ('Set-Cookie', 'edt=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0')])
+
+        if not self._authed():
+            return self._need_auth()
+
+        # ---- 保存文章 ----
+        if p == '/api/save':
             f = data.get('file', '')
             if not SAFE_NAME.match(f):
                 return self._json({'error': '文件名只能含英文、数字、-、_'}, 400)
-            p = os.path.join(POSTS_DIR, f)
-            old = open(p, encoding='utf-8').read() if os.path.exists(p) else ''
+            fp = os.path.join(POSTS_DIR, f)
+            old = open(fp, encoding='utf-8').read() if os.path.exists(fp) else ''
             md = render_md(old, {
                 'title': data.get('title') or '无标题',
                 'date': data.get('date') or date.today().isoformat(),
@@ -179,381 +474,86 @@ class Handler(BaseHTTPRequestHandler):
                 'description': data.get('description', ''),
                 'top': 'true' if data.get('top') else ''
             }, data.get('body', ''))
-            open(p, 'w', encoding='utf-8', newline='\n').write(md)
+            open(fp, 'w', encoding='utf-8', newline='\n').write(md)
             return self._json({'ok': True, 'file': f})
 
-        # 整理分类：把某个分类整批改名（new 传空 = 这批文章变成"未分类"）
-        if u.path == '/api/category/rename':
+        # ---- 批量移动文章到某个分类 ----
+        if p == '/api/post/move':
+            files = data.get('files') or []
+            cat = (data.get('category') or '').strip()
+            if BAD_CAT.search(cat):
+                return self._json({'error': '分类名不能含冒号或井号'}, 400)
+            ok, bad = [], []
+            for f in files:
+                if not SAFE_NAME.match(str(f)):
+                    bad.append(str(f))
+                    continue
+                try:
+                    set_category(f, cat)
+                    ok.append(f)
+                except Exception:
+                    bad.append(str(f))
+            return self._json({'ok': True, 'changed': len(ok), 'failed': bad})
+
+        # ---- 单篇删除 ----
+        if p == '/api/delete':
+            f = data.get('file', '')
+            if not SAFE_NAME.match(f):
+                return self._json({'error': '非法文件名'}, 400)
+            fp = os.path.join(POSTS_DIR, f)
+            if os.path.exists(fp):
+                os.remove(fp)
+            return self._json({'ok': True})
+
+        # ---- 分类改名（new 为空 = 变成未分类）----
+        if p == '/api/category/rename':
             old = (data.get('old') or '').strip()
             new = (data.get('new') or '').strip()
             if not old:
                 return self._json({'error': '缺少原分类名'}, 400)
+            if BAD_CAT.search(new):
+                return self._json({'error': '分类名不能含冒号或井号'}, 400)
             changed = 0
-            for f in sorted(os.listdir(POSTS_DIR)):
-                if not f.endswith('.md'):
+            for it in read_posts():
+                if (it['category'] or '未分类') != old:
                     continue
-                p = os.path.join(POSTS_DIR, f)
-                text = open(p, encoding='utf-8').read()
-                fm, body = parse_md(text)
-                if (fm.get('category') or '未分类') != old:
-                    continue
-                open(p, 'w', encoding='utf-8', newline='\n').write(render_md(text, {
-                    'title': fm.get('title', ''), 'date': fm.get('date', ''),
-                    'category': new, 'description': fm.get('description', ''),
-                    'top': 'true' if fm.get('top') == 'true' else ''
-                }, body))
+                set_category(it['file'], new)
                 changed += 1
             return self._json({'ok': True, 'changed': changed})
 
-        if u.path == '/api/publish':
+        # ---- 发布 ----
+        if p == '/api/publish':
             logs = []
-            for args, msg in [(['add', '-A'], '加入暂存区'),
-                              (['commit', '-m',
-                                'update: ' + date.today().isoformat()],
-                               '提交')]:
+            # 只提交 docs 目录：避免把工作区里的临时文件卷进仓库
+            for args, msg in [(['add', '-A', 'docs'], '加入暂存区'),
+                              (['commit', '-m', 'update: ' + date.today().isoformat()], '提交')]:
                 code, out = run_git(args)
                 logs.append(f'== {msg} ==\n{out or "(无输出)"}')
-                if code != 0:
-                    return self._json({'ok': False,
-                                       'log': '\n'.join(logs)})
-            # 先试常规 git push；网络不通时回退到 GitHub API 推送
+                if code != 0 and 'nothing to commit' not in out:
+                    return self._json({'ok': False, 'log': '\n'.join(logs)})
             code, out = run_git(['push'])
             if code == 0:
                 logs.append('== 推送到 GitHub ==\ngit push 成功')
             else:
                 logs.append(f'== git push 失败，改走 API 推送 ==\n{out}')
-                py = sys.executable
-                r = subprocess.run([py, os.path.join(ROOT, 'editor',
-                                                     'api_push.py'),
+                r = subprocess.run([sys.executable, os.path.join(HERE, 'api_push.py'),
                                     '.', 'update: ' + date.today().isoformat()],
                                    cwd=ROOT, capture_output=True, text=True,
-                                   encoding='utf-8', errors='replace',
-                                   timeout=300)
+                                   encoding='utf-8', errors='replace', timeout=300)
                 ok = 'PUSH_OK' in (r.stdout or '')
-                logs.append(r.stdout[-600:] if ok else
-                            (r.stdout + r.stderr)[-1200:])
+                logs.append(r.stdout[-600:] if ok else (r.stdout + r.stderr)[-1200:])
                 if not ok:
-                    return self._json({'ok': False,
-                                       'log': '\n'.join(logs)})
+                    return self._json({'ok': False, 'log': '\n'.join(logs)})
             return self._json({'ok': True, 'log': '\n'.join(logs)})
-
-        if u.path == '/api/delete':
-            f = data.get('file', '')
-            if not SAFE_NAME.match(f):
-                return self._json({'error': '非法文件名'}, 400)
-            os.remove(os.path.join(POSTS_DIR, f))
-            return self._json({'ok': True})
 
         self.send_response(404)
         self.end_headers()
 
-    def log_message(self, *a):
-        pass
-
-
-PAGE = '''<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<title>博客编辑器</title>
-<style>
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: "Microsoft YaHei", sans-serif; background: #f5f6f7; color: #24292f; height: 100vh; display: flex; flex-direction: column; }
-header { background: #24292f; color: #fff; padding: 10px 18px; display: flex; align-items: center; gap: 12px; }
-header h1 { font-size: 15px; font-weight: 500; margin-right: auto; }
-button { border: 1px solid #d0d7de; background: #fff; color: #24292f; border-radius: 6px; padding: 6px 14px; font-size: 13px; cursor: pointer; }
-button:hover { border-color: #0969da; color: #0969da; }
-button.primary { background: #0969da; border-color: #0969da; color: #fff; }
-button.primary:hover { background: #0576e8; }
-main { flex: 1; display: flex; min-height: 0; }
-aside { width: 250px; background: #fff; border-right: 1px solid #d0d7de; overflow-y: auto; padding: 8px; }
-aside a { display: block; padding: 8px 10px; border-radius: 6px; text-decoration: none; color: #24292f; font-size: 13px; }
-aside a:hover { background: #eef1f4; }
-aside a .d { display: block; color: #8c959f; font-size: 11px; margin-top: 2px; }
-aside .cat { font-size: 12px; font-weight: 600; color: #57606a; padding: 12px 10px 4px; border-top: 1px solid #eaecef; margin-top: 4px; }
-aside .cat:first-child { border-top: none; margin-top: 0; }
-#manage { padding: 4px; }
-#manage .mhead { font-size: 13px; font-weight: 600; padding: 6px 6px 2px; }
-#manage .mtip { font-size: 11.5px; color: #8c959f; line-height: 1.6; padding: 0 6px 8px; }
-#manage .mline { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
-#manage .mline input { flex: 1; min-width: 0; border: 1px solid #d0d7de; border-radius: 6px; padding: 6px 8px; font-size: 13px; }
-#manage .mline .mc { font-size: 11px; color: #8c959f; white-space: nowrap; }
-#manage .mact { display: flex; gap: 8px; margin-top: 10px; padding: 0 6px; }
-section { flex: 1; display: flex; flex-direction: column; padding: 14px 18px; gap: 10px; min-width: 0; }
-.row { display: flex; gap: 10px; }
-.row input[type=text] { flex: 1; min-width: 0; border: 1px solid #d0d7de; border-radius: 6px; padding: 7px 10px; font-size: 13px; }
-#date { flex: 0 0 120px; }
-#cat { flex: 0 0 180px; background: #fbfcfd; }
-#desc { width: 100%; border: 1px solid #d0d7de; border-radius: 6px; padding: 7px 10px; font-size: 13px; }
-label.chk { display: flex; align-items: center; gap: 5px; font-size: 13px; white-space: nowrap; }
-.split { flex: 1; display: flex; min-height: 0; }
-textarea { flex: 1; min-width: 0; border: 1px solid #d0d7de; border-radius: 6px 0 0 6px; border-right: none; padding: 12px; font: 13px/1.7 Consolas, monospace; resize: none; min-height: 0; }
-#preview { position: relative; flex: 1; min-width: 0; overflow-y: auto; background: #fff; border: 1px solid #d0d7de; border-radius: 0 6px 6px 0; padding: 30px 36px; }
-#status { background: #24292f; color: #9fd29f; border-radius: 6px; padding: 8px 12px; font: 12px/1.6 Consolas, monospace; white-space: pre-wrap; max-height: 120px; overflow-y: auto; }
-.empty { color: #8c959f; text-align: center; margin-top: 40px; font-size: 13px; }
-/* ===== 预览区排版：对齐博客正文样式 ===== */
-#preview h1 { font-size: 26px; letter-spacing: 0.02em; margin-bottom: 6px; color: #1f2328; }
-#preview h2 { font-size: 20px; margin: 28px 0 12px; padding-bottom: 8px; border-bottom: 1px solid #eaecef; color: #1f2328; }
-#preview h3 { font-size: 17px; margin: 22px 0 10px; color: #1f2328; }
-#preview p { line-height: 1.85; font-size: 14.5px; color: #2a2f36; margin: 0 0 14px; }
-#preview table { border-collapse: collapse; margin: 14px 0; width: 100%; font-size: 13.5px; }
-#preview th, #preview td { border: 1px solid #d0d7de; padding: 7px 12px; text-align: left; line-height: 1.6; }
-#preview th { background: #f6f8fa; font-weight: 600; }
-#preview tr:nth-child(2n) td { background: #f9fafb; }
-#preview ol, #preview ul { padding-left: 26px; line-height: 1.9; font-size: 14.5px; color: #2a2f36; margin: 0 0 14px; }
-#preview li { margin-bottom: 4px; }
-#preview code { background: #f0f1f3; border-radius: 4px; padding: 1px 6px; font: 12.5px/1.6 Consolas, monospace; color: #cf222e; }
-#preview pre { background: #f6f8fa; border-radius: 8px; padding: 14px 16px; overflow-x: auto; margin: 0 0 14px; }
-#preview pre code { background: none; padding: 0; color: #24292f; }
-#preview blockquote { border-left: 3px solid #d0d7de; color: #6a737d; padding: 2px 14px; margin: 0 0 14px; background: #fafbfc; }
-#preview a { color: #0969da; }
-#preview hr { border: none; border-top: 1px solid #eaecef; margin: 20px 0; }
-</style>
-</head>
-<body>
-<header>
-  <h1>博客编辑器（仅本机可访问）</h1>
-  <button onclick="window.open('http://localhost:5173')">预览站点</button>
-  <button onclick="openManage()">整理分类</button>
-  <button onclick="newPost()">新建文章</button>
-  <button class="primary" onclick="save(false)">保存</button>
-  <button class="primary" onclick="save(true)">保存并发布</button>
-</header>
-<main>
-  <aside>
-    <div id="list"></div>
-    <div id="manage" hidden>
-      <div class="mhead">整理分类（左侧目录的大类）</div>
-      <div class="mtip">改名字后点「应用」，这个分类下的文章会一起移动。名字留空 = 这批文章变成未分类。想新建分类，直接在文章的分类框里写个新名字就行。</div>
-      <div id="mrow"></div>
-      <div class="mact">
-        <button class="primary" onclick="applyManage()">应用</button>
-        <button onclick="closeManage()">返回</button>
-      </div>
-    </div>
-  </aside>
-  <section>
-    <div class="row">
-      <input type="text" id="title" placeholder="文章标题">
-      <input type="text" id="date" placeholder="日期">
-      <input type="text" id="cat" list="catlist" placeholder="分类（左侧目录的大类）">
-      <label class="chk"><input type="checkbox" id="top">置顶</label>
-    </div>
-    <datalist id="catlist"></datalist>
-    <input type="text" id="desc" placeholder="摘要（显示在首页卡片上）">
-    <div class="split">
-      <textarea id="body" placeholder="左边写 Markdown，右边实时预览博客效果。结构建议：## 分节标题 + 表格 + 有序列表。"></textarea>
-      <div id="preview"></div>
-    </div>
-    <div id="status">就绪</div>
-  </section>
-</main>
-<script>
-let cur = null;
-let mgRows = [];
-const $ = id => document.getElementById(id);  // 显式取元素，避免撞上 window.top / window.status 等内置属性
-async function api(path, data) {
-  try {
-    const opt = data ? {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data)} : {};
-    const r = await fetch(path, opt);
-    return await r.json();
-  } catch (e) {
-    alert('连接编辑器服务失败：请确认 server.py 正在运行（双击 blog 目录下的 editor.bat）');
-    throw e;
-  }
-}
-function esc2(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
-async function refresh() {
-  const items = await api('/api/posts');
-  // 按分类归组（顺序跟着列表顺序走，也就是最新的分类排前面）
-  const groups = new Map();
-  for (const p of items) {
-    const c = p.category || '未分类';
-    if (!groups.has(c)) groups.set(c, []);
-    groups.get(c).push(p);
-  }
-  const el = $('list');
-  el.innerHTML = '';
-  for (const [cat, list] of groups) {
-    const h = document.createElement('div');
-    h.className = 'cat';
-    h.textContent = cat + ' · ' + list.length + ' 篇';
-    el.appendChild(h);
-    for (const p of list) {
-      const a = document.createElement('a');
-      a.href = 'javascript:openPost(\\'' + p.file + '\\')';
-      a.innerHTML = esc2(p.title || p.file) + '<span class=d>' + esc2(p.date) + '</span>';
-      el.appendChild(a);
-    }
-  }
-  $('catlist').innerHTML = [...groups.keys()].filter(c => c !== '未分类')
-    .map(c => '<option value="' + esc2(c) + '">').join('');
-}
-async function openPost(f) {
-  const p = await api('/api/post?file=' + f);
-  cur = p.file;
-  $('title').value = p.title; $('date').value = p.date; $('desc').value = p.description;
-  $('cat').value = p.category; $('top').checked = p.top; $('body').value = p.body;
-  renderPreview();
-  $('status').textContent = '已打开 ' + f + '（未保存的改动在点保存前不会生效）';
-}
-function newPost() {
-  const today = new Date().toISOString().slice(0,10);
-  const f = prompt('文件名（英文数字，建议 YYYY-MM-DD-标题）：', today + '-new-post');
-  if (!f) return;
-  cur = f.endsWith('.md') ? f : f + '.md';
-  $('title').value = ''; $('date').value = today;
-  $('desc').value = ''; $('cat').value = ''; $('top').checked = false; $('body').value = '';
-  renderPreview();
-  $('status').textContent = '新文章 ' + cur + '，填好分类和正文后点"保存"';
-}
-async function save(publish) {
-  if (!cur) { alert('先新建或从左侧选择一篇文章'); return; }
-  $('status').textContent = '保存中...';
-  const r = await api('/api/save', {file: cur, title: $('title').value, date: $('date').value,
-    category: $('cat').value, description: $('desc').value, top: $('top').checked, body: $('body').value});
-  if (r.error) { $('status').textContent = '保存失败：' + r.error; return; }
-  if (!publish) { $('status').textContent = '已保存（仅本地，未发布）'; refresh(); return; }
-  $('status').textContent = '已保存，正在发布（add → commit → push）...';
-  const p = await api('/api/publish', {});
-  $('status').textContent = p.log + '\\n\\n' + (p.ok ? '✔ 发布完成，1-2 分钟后线上更新' : '✘ 发布失败（常见原因：还没配置 GitHub 远程仓库）');
-  refresh();
-}
-/* ===== 整理分类 ===== */
-async function openManage() {
-  const items = await api('/api/posts');
-  const cnt = new Map();
-  for (const p of items) {
-    const c = p.category || '未分类';
-    cnt.set(c, (cnt.get(c) || 0) + 1);
-  }
-  mgRows = [...cnt.entries()].map(([name, n]) => ({old: name, n}));
-  const box = $('mrow');
-  box.innerHTML = '';
-  for (const r of mgRows) {
-    const d = document.createElement('div');
-    d.className = 'mline';
-    d.innerHTML = '<input value="' + esc2(r.old === '未分类' ? '' : r.old) + '">'
-      + '<span class="mc">' + r.n + ' 篇</span>';
-    box.appendChild(d);
-  }
-  $('list').hidden = true;
-  $('manage').hidden = false;
-}
-function closeManage() {
-  $('manage').hidden = true;
-  $('list').hidden = false;
-}
-async function applyManage() {
-  const inputs = Array.from($('mrow').querySelectorAll('input'));
-  const changes = inputs.map((el, i) => ({old: mgRows[i].old, nw: el.value.trim()}))
-    .filter(c => c.old !== (c.nw || '未分类'));
-  if (!changes.length) { alert('没有改动'); return; }
-  const msgs = [];
-  for (const c of changes) {
-    const r = await api('/api/category/rename', {old: c.old, new: c.nw});
-    msgs.push((r.error ? '✘ ' : '✔ ') + c.old + ' → ' + (c.nw || '未分类')
-      + (r.error ? '：' + r.error : '（' + (r.changed || 0) + ' 篇）'));
-  }
-  alert(msgs.join('\\n'));
-  closeManage();
-  refresh();
-}
-/* ===== Markdown 渲染（覆盖博客文章常用语法） ===== */
-function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-function inline(s) {
-  return s
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/\\*\\*([^*]+)\\*\\*/g, '<strong>$1</strong>')
-    .replace(/\\*([^*]+)\\*/g, '<em>$1</em>')
-    .replace(/\\[([^\\]]+)\\]\\(([^)]+)\\)/g, '<a href="$2" target="_blank">$1</a>');
-}
-function md2html(src) {
-  const lines = src.split(/\\r?\\n/);
-  const out = [], starts = [];  // starts[k] = 第 k 个内容块对应的源文件行号（用于光标同步滚动）
-  const push = (html, ln) => { out.push(html); starts.push(ln); };
-  let i = 0, inCode = false, code = [], codeStart = 0, list = null, listBuf = null, listStart = 0;
-  const closeList = () => { if (list) { push('<' + list + '>' + listBuf.join('') + '</' + list + '>', listStart); list = null; listBuf = null; } };
-  const cells = h => h.replace(/^\\||\\|$/g, '').split('|').map(c => inline(esc(c.trim())));
-  while (i < lines.length) {
-    const L = lines[i];
-    if (/^```/.test(L)) {
-      closeList();
-      if (!inCode) { inCode = true; code = []; codeStart = i; }
-      else { inCode = false; push('<pre><code>' + esc(code.join('\\n')) + '</code></pre>', codeStart); }
-      i++; continue;
-    }
-    if (inCode) { code.push(L); i++; continue; }
-    if (/^\\s*$/.test(L)) { closeList(); i++; continue; }
-    let m = L.match(/^(#{1,6})\\s+(.*)/);
-    if (m) { closeList(); const n = m[1].length; push('<h' + n + '>' + inline(esc(m[2])) + '</h' + n + '>', i); i++; continue; }
-    if (/^\\|.*\\|/.test(L) && i + 1 < lines.length && /^\\|[\\s:\\-|]+\\|?\\s*$/.test(lines[i + 1])) {
-      closeList();
-      const head = cells(L); const tStart = i; i += 2;
-      const rows = [];
-      while (i < lines.length && /^\\|.*\\|/.test(lines[i])) { rows.push(cells(lines[i])); i++; }
-      push('<table><thead><tr>' + head.map(c => '<th>' + c + '</th>').join('') + '</tr></thead><tbody>'
-        + rows.map(r => '<tr>' + r.map(c => '<td>' + c + '</td>').join('') + '</tr>').join('') + '</tbody></table>', tStart);
-      continue;
-    }
-    m = L.match(/^\\s*\\d+\\.\\s+(.*)/);
-    if (m) { if (list !== 'ol') { closeList(); list = 'ol'; listBuf = []; listStart = i; } listBuf.push('<li>' + inline(esc(m[1])) + '</li>'); i++; continue; }
-    m = L.match(/^\\s*[-*]\\s+(.*)/);
-    if (m) { if (list !== 'ul') { closeList(); list = 'ul'; listBuf = []; listStart = i; } listBuf.push('<li>' + inline(esc(m[1])) + '</li>'); i++; continue; }
-    if (/^>\\s?/.test(L)) { closeList(); push('<blockquote>' + inline(esc(L.replace(/^>\\s?/, ''))) + '</blockquote>', i); i++; continue; }
-    closeList();
-    const pStart = i;
-    const para = [inline(esc(L))]; i++;
-    while (i < lines.length && !/^\\s*$/.test(lines[i]) && !/^(#{1,6}\\s|```|\\||\\s*\\d+\\.\\s|\\s*[-*]\\s|>)/.test(lines[i])) {
-      para.push(inline(esc(lines[i]))); i++;
-    }
-    push('<p>' + para.join('<br>') + '</p>', pStart);
-  }
-  closeList();
-  if (inCode) push('<pre><code>' + esc(code.join('\\n')) + '</code></pre>', codeStart);
-  return { html: out.join('\\n'), starts: starts };
-}
-let view = { starts: [], el: null };
-function renderPreview() {
-  view = md2html($('body').value);
-  $('preview').innerHTML = view.html;
-}
-/* 光标同步：算出光标所在源码行 → 定位对应内容块 → 预览滚动过去 */
-function syncPreview() {
-  const ta = $('body');
-  const curLine = ta.value.slice(0, ta.selectionStart).split('\\n').length - 1;
-  const kids = $('preview').children;
-  if (!kids.length) return;
-  let idx = 0;
-  for (let k = 0; k < view.starts.length; k++) { if (view.starts[k] <= curLine) idx = k; else break; }
-  const el = kids[idx];
-  if (el) $('preview').scrollTop = Math.max(0, el.offsetTop - $('preview').offsetTop - 28);
-}
-let pt = null;
-$('body').addEventListener('input', () => { clearTimeout(pt); pt = setTimeout(() => { renderPreview(); syncPreview(); }, 250); });
-$('body').addEventListener('click', syncPreview);
-$('body').addEventListener('keyup', syncPreview);
-refresh();
-renderPreview();
-// 支持 ?file=xxx.md 直接打开指定文章（从博客页"编辑此页"跳转过来）
-{
-  const q = new URLSearchParams(location.search).get('file');
-  if (q) openPost(q.endsWith('.md') ? q : q + '.md');
-}
-setInterval(async () => {
-  const s = await api('/api/status');
-  if (s.git_status !== '(工作区干净)') {
-    $('status').textContent = '⚠ 有未发布的本地改动：\\n' + s.git_status;
-  }
-}, 20000);
-</script>
-</body>
-</html>'''
 
 if __name__ == '__main__':
     os.makedirs(POSTS_DIR, exist_ok=True)
     srv = ThreadingHTTPServer((HOST, PORT), Handler)
-    print(f'博客编辑器运行在 http://{HOST}:{PORT} （Ctrl+C 停止）')
+    print(f'博客控制台运行在 http://{HOST}:{PORT} （Ctrl+C 停止）')
     webbrowser.open(f'http://{HOST}:{PORT}')
     try:
         srv.serve_forever()

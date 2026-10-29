@@ -1,9 +1,8 @@
 ---
 title: 把超星学习通整门课的课件扒下来（零依赖小工具）
 date: 2026-09-16
-category: 学习记录
+category: 工具与环境
 description: 超星学习通没有一键下载全部课件的功能。从本机 cookie 库偷登录态走不通，改用 DevTools 复制会话，再踩了 vc3 被 URL 转义的坑，最后做成纯标准库脚本。
-top: false
 updates:
   - 2026-09-16 首版发布
 ---

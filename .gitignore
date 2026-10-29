@@ -4,3 +4,5 @@ docs/.vitepress/cache/
 docs/.vitepress/*.timestamp-*.mjs
 __pycache__/
 *.pyc
+# 控制台密码哈希：只存在本机，不进仓库
+editor/.auth.json

@@ -10,8 +10,6 @@ import DiagramPublish from './components/DiagramPublish.vue'
 import DiagramWeTroubleshoot from './components/DiagramWeTroubleshoot.vue'
 import DiagramDecommission from './components/DiagramDecommission.vue'
 import DiagramFaultLayers from './components/DiagramFaultLayers.vue'
-import DiagramMistakeKinds from './components/DiagramMistakeKinds.vue'
-import DiagramDataPaths from './components/DiagramDataPaths.vue'
 import DemoLagrange from './components/DemoLagrange.vue'
 import DemoError from './components/DemoError.vue'
 import './styles/custom.css'
@@ -31,14 +29,12 @@ export default {
     app.component('HomeHero', HomeHero)
     // 文章开头的"速览"卡片：<Lead :points="['…', '…']" />
     app.component('Lead', Lead)
-    // 正文配图（自带配色，跟随亮/暗主题）
+    // 正文配图（自带配色，跟随亮/暗主题）：<DiagramPublish /> / <DiagramNarrative />
     app.component('DiagramPublish', DiagramPublish)
     app.component('DiagramNarrative', DiagramNarrative)
     app.component('DiagramWeTroubleshoot', DiagramWeTroubleshoot)
     app.component('DiagramDecommission', DiagramDecommission)
     app.component('DiagramFaultLayers', DiagramFaultLayers)
-    app.component('DiagramMistakeKinds', DiagramMistakeKinds)
-    app.component('DiagramDataPaths', DiagramDataPaths)
     // 正文可交互演示（canvas，跟随亮/暗主题）：<DemoLagrange /> / <DemoError />
     app.component('DemoLagrange', DemoLagrange)
     app.component('DemoError', DemoError)

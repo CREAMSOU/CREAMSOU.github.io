@@ -45,8 +45,9 @@ def call(url, data=None, method=None):
         raise SystemExit(f'HTTP {e.code} at {url}\n{body}')
 
 
-files = subprocess.run(['git', 'ls-files'], cwd=ROOT, capture_output=True,
-                       text=True, check=True).stdout.split()
+raw_files = subprocess.run(['git', 'ls-files', '-z'], cwd=ROOT,
+                           capture_output=True, check=True).stdout
+files = [x.decode('utf-8') for x in raw_files.split(b'\0') if x]
 print(f'{len(files)} files to push')
 
 # 空仓库上 Git Data API 会 409：先用 Contents API 引导出 main 分支
@@ -60,9 +61,13 @@ if not branches:
 
 tree = []
 for i, f in enumerate(files):
-    p = os.path.join(ROOT, f)
-    raw = open(p, 'rb').read()
-    blob = call('/git/blobs', {'content': base64.b64encode(raw).decode(),
+    # 关键：读 HEAD 的版本，不读工作区。
+    # 否则别的对话改了还没提交的文件也会被一起推上线。
+    r = subprocess.run(['git', 'show', 'HEAD:' + f], cwd=ROOT, capture_output=True)
+    if r.returncode != 0:
+        print(f'[skip] {f} (HEAD 中不存在)')
+        continue
+    blob = call('/git/blobs', {'content': base64.b64encode(r.stdout).decode(),
                                'encoding': 'base64'})
     tree.append({'path': f.replace('\\', '/'), 'mode': '100644',
                  'type': 'blob', 'sha': blob['sha']})

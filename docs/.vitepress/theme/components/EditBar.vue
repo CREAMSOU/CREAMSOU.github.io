@@ -37,8 +37,8 @@ onMounted(() => {
     class="edit-in-editor"
     :href="editorUrl"
     target="_blank"
-    title="检测到本机正在运行博客编辑器"
+    title="检测到本机正在运行博客控制台（需要登录）"
   >
-    {{ isHome ? '✏ 打开编辑器' : '✏ 编辑此页' }}
+    {{ isHome ? '⚙ 打开控制台' : '✏ 编辑此页' }}
   </a>
 </template>
