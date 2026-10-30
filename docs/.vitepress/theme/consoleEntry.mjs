@@ -45,6 +45,8 @@ function readHashKey() {
 if (typeof window !== 'undefined') {
   try {
     readHashKey()
+    // 在同一页里手动改 hash 也能生效
+    window.addEventListener('hashchange', readHashKey)
   } catch {
     /* 忽略 */
   }
