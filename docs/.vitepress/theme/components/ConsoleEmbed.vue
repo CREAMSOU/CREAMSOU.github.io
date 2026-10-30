@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import { entryOn, setEntry } from '../consoleEntry.mjs'
 
 // 这个页面长在线上博客里，真正干活的服务在本机 127.0.0.1:8891。
 // 新版 Chrome 默认不允许网页直接访问本机服务（Local Network Access），
@@ -8,6 +9,7 @@ const LOCAL = 'http://127.0.0.1:8891/'
 const STATE = ref('idle')   // idle | checking | on | off
 const frameKey = ref(0)
 const file = ref('')
+const entry = ref(false)
 
 const localUrl = computed(() =>
   file.value ? LOCAL + '?file=' + encodeURIComponent(file.value) : LOCAL)
@@ -26,8 +28,15 @@ async function embed() {
   try {
     const r = await fetch(LOCAL + 'api/ping', { signal: ctl.signal, cache: 'no-store' })
     const d = r.ok ? await r.json() : null
-    if (d && d.app === 'blog-editor') { STATE.value = 'on'; frameKey.value++ }
-    else STATE.value = 'off'
+    if (d && d.app === 'blog-editor') {
+      STATE.value = 'on'
+      frameKey.value++
+      // 能连上本机控制台，基本可以确定就是本人：顺手把这台电脑的入口打开
+      setEntry(true)
+      entry.value = true
+    } else {
+      STATE.value = 'off'
+    }
   } catch {
     STATE.value = 'off'
   } finally {
@@ -35,8 +44,18 @@ async function embed() {
   }
 }
 
+function toggleEntry() {
+  entry.value = !entry.value
+  setEntry(entry.value)
+}
+
 onMounted(() => {
-  file.value = new URLSearchParams(location.search).get('file') || ''
+  const q = new URLSearchParams(location.search)
+  file.value = q.get('file') || ''
+  const nav = q.get('nav')
+  if (nav === '1') setEntry(true)
+  if (nav === '0') setEntry(false)
+  entry.value = entryOn()
 })
 </script>
 
@@ -78,6 +97,21 @@ onMounted(() => {
         </a>
         <button class="ce-btn" @click="embed">在本页嵌入</button>
       </div>
+
+      <div class="ce-entry">
+        <span class="ce-entry-txt">
+          {{ entry
+            ? '这台电脑上已显示「控制台」入口'
+            : '这台电脑上不显示入口 —— 别人自然也看不见' }}
+        </span>
+        <button class="ce-btn" @click="toggleEntry">
+          {{ entry ? '关掉入口' : '在这台电脑上开启入口' }}
+        </button>
+      </div>
+      <p class="ce-hint">
+        开关只记在这台浏览器本地，不上传到任何地方。换电脑或换手机想用，
+        打开 <code>/console?nav=1</code> 一次即可。
+      </p>
     </div>
   </div>
 </template>

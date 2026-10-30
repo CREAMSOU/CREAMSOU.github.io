@@ -1,15 +1,25 @@
 <script setup>
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { withBase } from 'vitepress'
+import { entryOn, onEntryChange } from '../consoleEntry.mjs'
 
 defineProps({ mobile: { type: Boolean, default: false } })
 
-// 常驻入口：不探测、不猜，点进去由 /console 页讲清楚怎么连。
-// 原因：新版 Chrome 默认不允许网页直接访问本机服务（Local Network Access），
-// 页面里自动探测在多数环境必定失败，入口就会时隐时现。
+// 默认不渲染：别人的浏览器里没有这个开关，HTML 里也就没有「控制台」三个字。
+// 只有在 /console 页开过入口的那台浏览器上，这里才会把链接显示出来。
+const show = ref(false)
+let off = null
+
+onMounted(() => {
+  show.value = entryOn()
+  off = onEntryChange(() => { show.value = entryOn() })
+})
+onBeforeUnmount(() => { if (off) off() })
 </script>
 
 <template>
   <a
+    v-if="show"
     class="console-nav"
     :class="{ 'console-nav-mobile': mobile }"
     :href="withBase('/console')"
