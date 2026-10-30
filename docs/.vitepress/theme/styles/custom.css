@@ -793,9 +793,7 @@ html.sb-hide .sb-toggle {
 
 /* 入口开关：只影响这台浏览器的 localStorage */
 .ce-entry {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+  display: block;
   margin-top: 22px;
   padding-top: 18px;
   border-top: 1px solid var(--vp-c-divider);
@@ -803,8 +801,57 @@ html.sb-hide .sb-toggle {
   color: var(--vp-c-text-2);
 }
 
+.ce-entry-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .ce-entry-txt {
   flex: 1;
+}
+
+.ce-bm {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.ce-bm-label {
+  font-size: 12.5px;
+  color: var(--vp-c-text-3);
+}
+
+.ce-bm-link {
+  display: inline-block;
+  padding: 4px 12px;
+  border: 1px dashed var(--vp-c-divider);
+  border-radius: 6px;
+  font-size: 12.5px;
+  color: var(--vp-c-brand-1);
+  text-decoration: none;
+  cursor: grab;
+  background: var(--vp-c-bg-alt);
+}
+
+.ce-bm-link:hover {
+  border-color: var(--vp-c-brand-1);
+  text-decoration: none;
+}
+
+.ce-secret {
+  font-family: var(--vp-font-family-mono);
+  font-size: 12px !important;
+  padding: 3px 8px !important;
+  color: var(--vp-c-text-1) !important;
+  word-break: break-all;
+}
+
+.ce-btn-sm {
+  font-size: 12px;
+  padding: 3px 9px;
 }
 
 .ce-hint {

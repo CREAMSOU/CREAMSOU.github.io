@@ -31,3 +31,21 @@ export function onEntryChange(fn) {
   window.addEventListener(EVT, fn)
   return () => window.removeEventListener(EVT, fn)
 }
+
+// 密钥链接：https://creamsou.github.io/#console-on
+// # 后面的内容浏览器根本不会发给服务器，也不进 Referer、不进 GitHub 访问日志，
+// 所以「谁用过这个链接」在服务端查不到。打开后立刻把 # 抹掉，地址栏不留痕。
+function readHashKey() {
+  const h = (window.location.hash || '').replace(/^#/, '')
+  if (h !== 'console-on' && h !== 'console-off') return
+  setEntry(h === 'console-on')
+  history.replaceState(null, '', window.location.pathname + window.location.search)
+}
+
+if (typeof window !== 'undefined') {
+  try {
+    readHashKey()
+  } catch {
+    /* 忽略 */
+  }
+}
